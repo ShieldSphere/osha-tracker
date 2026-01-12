@@ -1,0 +1,40 @@
+# Environment and secrets
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files (large CSVs)
+*.csv
+
+# Windows
+nul
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Local development
+.claude/
+
+# Distribution
+dist/
+build/
+*.egg-info/

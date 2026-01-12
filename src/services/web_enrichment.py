@@ -1,0 +1,384 @@
+"""Web enrichment service using multi-source search, Jina Reader and OpenAI."""
+import logging
+import httpx
+import json
+import re
+from typing import Optional, Dict, Any, List
+from urllib.parse import quote_plus, unquote
+
+from openai import OpenAI
+
+from src.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class WebEnrichmentService:
+    """Service to enrich company data from multiple web sources."""
+
+    def __init__(self):
+        self.openai_client = None
+        if settings.OPENAI_API_KEY:
+            self.openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+    async def _duckduckgo_search(self, query: str, num_results: int = 10) -> List[str]:
+        """Search DuckDuckGo and return list of URLs."""
+        try:
+            url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                })
+                response.raise_for_status()
+
+            # Extract URLs from search results
+            urls = re.findall(r'href="//duckduckgo\.com/l/\?uddg=([^"&]+)', response.text)
+            decoded_urls = [unquote(u) for u in urls[:num_results]]
+            return decoded_urls
+        except Exception as e:
+            logger.error(f"DuckDuckGo search error: {e}")
+            return []
+
+    async def _fetch_with_jina(self, url: str, max_chars: int = 15000) -> Optional[str]:
+        """Fetch URL content using Jina Reader."""
+        if not url:
+            return None
+
+        jina_url = f"{settings.JINA_READER_URL}{url}"
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(jina_url, headers={"Accept": "text/markdown"})
+                response.raise_for_status()
+
+            content = response.text
+            if len(content) > max_chars:
+                content = content[:max_chars] + "\n\n[Content truncated...]"
+            return content
+        except Exception as e:
+            logger.error(f"Jina fetch error for {url}: {e}")
+            return None
+
+    async def search_company_website(self, company_name: str, city: str = None, state: str = None) -> Optional[str]:
+        """Find the company's main website."""
+        search_query = f"{company_name}"
+        if city:
+            search_query += f" {city}"
+        if state:
+            search_query += f" {state}"
+
+        logger.info(f"Searching for company website: {search_query}")
+        urls = await self._duckduckgo_search(search_query)
+
+        # Filter out social media and directory sites to find main company website
+        skip_domains = [
+            'linkedin.com', 'facebook.com', 'twitter.com', 'instagram.com',
+            'yelp.com', 'bbb.org', 'yellowpages.com', 'manta.com', 'dnb.com',
+            'indeed.com', 'glassdoor.com', 'wikipedia.org', 'bloomberg.com',
+            'zoominfo.com', 'mapquest.com', 'google.com', 'bing.com'
+        ]
+
+        for url in urls:
+            if not any(skip in url.lower() for skip in skip_domains):
+                logger.info(f"Found company website: {url}")
+                return url
+
+        return None
+
+    async def search_linkedin_profile(self, company_name: str, state: str = None) -> Optional[str]:
+        """Find company's LinkedIn page."""
+        query = f"site:linkedin.com/company {company_name}"
+        if state:
+            query += f" {state}"
+
+        urls = await self._duckduckgo_search(query, num_results=5)
+        for url in urls:
+            if 'linkedin.com/company' in url.lower():
+                logger.info(f"Found LinkedIn: {url}")
+                return url
+        return None
+
+    async def search_facebook_page(self, company_name: str, state: str = None) -> Optional[str]:
+        """Find company's Facebook page."""
+        query = f"site:facebook.com {company_name}"
+        if state:
+            query += f" {state}"
+
+        urls = await self._duckduckgo_search(query, num_results=5)
+        for url in urls:
+            if 'facebook.com' in url.lower() and '/posts/' not in url.lower():
+                logger.info(f"Found Facebook: {url}")
+                return url
+        return None
+
+    async def search_secretary_of_state(self, company_name: str, state: str) -> Optional[str]:
+        """Search for Secretary of State business registration."""
+        if not state:
+            return None
+
+        # Map state abbreviations to full names for better search
+        state_names = {
+            'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
+            'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
+            'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
+            'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
+            'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+            'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
+            'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
+            'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
+            'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
+            'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+            'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
+            'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
+            'WI': 'Wisconsin', 'WY': 'Wyoming'
+        }
+
+        state_full = state_names.get(state.upper(), state)
+        query = f"{company_name} {state_full} secretary of state business registration"
+        urls = await self._duckduckgo_search(query, num_results=5)
+
+        # Look for state government sites
+        for url in urls:
+            if '.gov' in url.lower() or 'sos.' in url.lower() or 'secretary' in url.lower():
+                logger.info(f"Found SOS record: {url}")
+                return url
+        return None
+
+    async def search_leadership_contacts(self, company_name: str, state: str = None) -> List[str]:
+        """Search for company leadership and contact pages."""
+        queries = [
+            f"{company_name} leadership team",
+            f"{company_name} about us management",
+            f"{company_name} contact owner CEO",
+            f"site:linkedin.com/in {company_name} owner CEO president"
+        ]
+        if state:
+            queries = [f"{q} {state}" for q in queries]
+
+        all_urls = []
+        for query in queries:
+            urls = await self._duckduckgo_search(query, num_results=5)
+            all_urls.extend(urls)
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_urls = []
+        for url in all_urls:
+            if url not in seen:
+                seen.add(url)
+                unique_urls.append(url)
+
+        return unique_urls[:10]
+
+    def _extract_with_openai(self, content: str, prompt: str, max_tokens: int = 2000) -> Optional[Dict]:
+        """Use OpenAI to extract structured data from content."""
+        if not self.openai_client or not content:
+            return None
+
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a data extraction assistant. Extract information and return valid JSON only. Be accurate - only include information explicitly found in the content. Use null for missing data."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=max_tokens
+            )
+
+            result_text = response.choices[0].message.content.strip()
+
+            # Clean up markdown code blocks
+            if result_text.startswith("```json"):
+                result_text = result_text[7:]
+            if result_text.startswith("```"):
+                result_text = result_text[3:]
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]
+
+            return json.loads(result_text.strip())
+        except Exception as e:
+            logger.error(f"OpenAI extraction error: {e}")
+            return None
+
+    async def enrich_company(self, company_name: str, city: str = None, state: str = None) -> Dict[str, Any]:
+        """
+        Full multi-source enrichment pipeline.
+
+        Searches:
+        1. Company website - for basic info, services, contact
+        2. LinkedIn company page - for company details, employee count
+        3. Facebook page - for social presence, reviews
+        4. Secretary of State - for business registration, founding date
+        5. Leadership/contact searches - for key personnel with LinkedIn profiles
+        """
+        result = {
+            "success": False,
+            "website_url": None,
+            "data": None,
+            "error": None,
+            "sources_searched": []
+        }
+
+        all_content = []
+
+        # 1. Find and fetch company website
+        logger.info(f"Starting enrichment for: {company_name}, {city}, {state}")
+        website_url = await self.search_company_website(company_name, city, state)
+        if website_url:
+            result["website_url"] = website_url
+            result["sources_searched"].append(("website", website_url))
+            content = await self._fetch_with_jina(website_url, max_chars=12000)
+            if content:
+                all_content.append(f"=== COMPANY WEBSITE ({website_url}) ===\n{content}")
+
+        # 2. Find LinkedIn company page
+        linkedin_url = await self.search_linkedin_profile(company_name, state)
+        if linkedin_url:
+            result["sources_searched"].append(("linkedin", linkedin_url))
+            content = await self._fetch_with_jina(linkedin_url, max_chars=8000)
+            if content:
+                all_content.append(f"=== LINKEDIN PAGE ({linkedin_url}) ===\n{content}")
+
+        # 3. Find Facebook page
+        facebook_url = await self.search_facebook_page(company_name, state)
+        if facebook_url:
+            result["sources_searched"].append(("facebook", facebook_url))
+            content = await self._fetch_with_jina(facebook_url, max_chars=5000)
+            if content:
+                all_content.append(f"=== FACEBOOK PAGE ({facebook_url}) ===\n{content}")
+
+        # 4. Search Secretary of State records
+        sos_url = await self.search_secretary_of_state(company_name, state)
+        if sos_url:
+            result["sources_searched"].append(("secretary_of_state", sos_url))
+            content = await self._fetch_with_jina(sos_url, max_chars=5000)
+            if content:
+                all_content.append(f"=== SECRETARY OF STATE ({sos_url}) ===\n{content}")
+
+        # 5. Search for leadership/contacts
+        leadership_urls = await self.search_leadership_contacts(company_name, state)
+        for url in leadership_urls[:3]:  # Limit to top 3 to save tokens
+            result["sources_searched"].append(("leadership_search", url))
+            content = await self._fetch_with_jina(url, max_chars=5000)
+            if content:
+                all_content.append(f"=== LEADERSHIP/CONTACT PAGE ({url}) ===\n{content}")
+
+        if not all_content:
+            result["error"] = "Could not fetch content from any sources"
+            return result
+
+        # Combine all content for extraction
+        combined_content = "\n\n".join(all_content)
+
+        # Truncate if too long (GPT-4o-mini context limit considerations)
+        max_total = 50000
+        if len(combined_content) > max_total:
+            combined_content = combined_content[:max_total] + "\n\n[Content truncated...]"
+
+        logger.info(f"Extracting data from {len(all_content)} sources ({len(combined_content)} chars)")
+
+        # Extract comprehensive company data
+        extraction_prompt = f"""Analyze all the following content gathered about "{company_name}" located in {city or 'unknown city'}, {state or 'unknown state'}.
+
+Extract ALL available information into this JSON structure. Search thoroughly through all sources - company website, LinkedIn, Facebook, Secretary of State records, and any leadership pages.
+
+{{
+    "official_name": "The official/legal company name",
+    "dba_names": ["Any 'doing business as' names"],
+    "description": "What the company does (2-3 sentences)",
+
+    "industry": "Primary industry category",
+    "sub_industry": "More specific industry",
+    "services": ["List of services/products offered"],
+
+    "year_founded": 2000,
+    "years_in_business": 24,
+
+    "business_registration": {{
+        "state": "State where registered",
+        "registration_number": "Business ID/filing number",
+        "business_type": "LLC, Corporation, etc.",
+        "registered_agent": "Name of registered agent",
+        "status": "Active, Inactive, etc.",
+        "filing_date": "Original filing date"
+    }},
+
+    "employee_count": 50,
+    "employee_range": "11-50 employees",
+
+    "contact_info": {{
+        "main_phone": "Primary phone number",
+        "secondary_phone": "Secondary phone if available",
+        "main_email": "Primary contact email",
+        "contact_form_url": "URL to contact form if no email"
+    }},
+
+    "headquarters": {{
+        "address": "Street address",
+        "city": "City",
+        "state": "State",
+        "postal_code": "ZIP code"
+    }},
+
+    "other_locations": [
+        {{"address": "Full address", "type": "Branch/Office/Warehouse"}}
+    ],
+
+    "social_media": {{
+        "linkedin_url": "LinkedIn company page URL",
+        "facebook_url": "Facebook page URL",
+        "twitter_url": "Twitter/X URL",
+        "instagram_url": "Instagram URL",
+        "youtube_url": "YouTube channel URL"
+    }},
+
+    "key_personnel": [
+        {{
+            "name": "Full name",
+            "title": "Job title (Owner, CEO, President, Safety Director, etc.)",
+            "linkedin_url": "Their personal LinkedIn profile URL if found",
+            "email": "Their email if found",
+            "phone": "Their direct phone if found"
+        }}
+    ],
+
+    "certifications": ["Any safety, quality, industry certifications"],
+    "safety_programs": ["Any mentioned safety initiatives or programs"],
+
+    "additional_notes": "Any other relevant business information found"
+}}
+
+IMPORTANT INSTRUCTIONS:
+- Look carefully for OWNER names, CEO, President, managers - these are critical
+- Include LinkedIn profile URLs for individuals when found (linkedin.com/in/...)
+- Extract phone numbers in any format found
+- For year_founded, look in Secretary of State records, About pages, LinkedIn
+- Include ALL addresses found - main office, branches, job sites
+- Use null for any field where information is not found
+- Do not make up information - only include what's explicitly in the content
+
+Content from multiple sources:
+{combined_content}
+"""
+
+        extracted_data = self._extract_with_openai(combined_content, extraction_prompt, max_tokens=3000)
+
+        if not extracted_data:
+            result["error"] = "Could not extract company data"
+            return result
+
+        # Add the URLs we found directly
+        if linkedin_url and extracted_data.get("social_media"):
+            extracted_data["social_media"]["linkedin_url"] = linkedin_url
+        if facebook_url and extracted_data.get("social_media"):
+            extracted_data["social_media"]["facebook_url"] = facebook_url
+
+        result["success"] = True
+        result["data"] = extracted_data
+        logger.info(f"Successfully enriched {company_name} with data from {len(result['sources_searched'])} sources")
+
+        return result
+
+
+# Singleton instance
+web_enrichment_service = WebEnrichmentService()
