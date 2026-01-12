@@ -1,3 +1,8 @@
+"""Check database for new data."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from src.database.connection import get_db_session
 from src.database.models import Inspection
 from sqlalchemy import select, func, desc, asc

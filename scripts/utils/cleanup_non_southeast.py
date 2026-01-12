@@ -2,6 +2,10 @@
 Cleanup script to remove inspections from non-southeast states.
 This keeps the database focused on the target region.
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from src.database.connection import get_db_session
 from src.database.models import Inspection, Violation
 from src.services.sync_service import SOUTHEAST_STATES

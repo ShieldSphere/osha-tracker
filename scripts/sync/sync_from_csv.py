@@ -5,6 +5,10 @@ This is more reliable than the API which doesn't support date filtering.
 Download latest CSV from: https://enforcedata.dol.gov/views/data_catalogs.php
 Look for "OSHA Inspection" dataset
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import csv
 from datetime import datetime, date
 from src.database.connection import get_db_session

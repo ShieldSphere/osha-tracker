@@ -9,10 +9,13 @@ This script efficiently syncs new/changed records by:
 
 Much faster than full comparison sync.
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import csv
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select, text

@@ -2,6 +2,10 @@
 Cleanup script to remove inspections older than 2020 from the database.
 This keeps the database focused on recent, relevant data.
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 from src.database.connection import get_db_session
 from src.database.models import Inspection, Violation
 from sqlalchemy import select, delete

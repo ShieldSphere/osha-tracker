@@ -1,6 +1,9 @@
 """Import OSHA violation data from local CSV file."""
-import csv
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+import csv
 from datetime import datetime
 from typing import Optional
 

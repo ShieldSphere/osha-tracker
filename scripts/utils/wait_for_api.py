@@ -2,8 +2,12 @@
 Script to periodically check if the OSHA API rate limit has cleared.
 Checks every 5 minutes and notifies when API is accessible again.
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import time
-from check_api_status import check_api_status
+from scripts.utils.check_api_status import check_api_status
 
 print("Monitoring OSHA API rate limit status...")
 print("Checking every 5 minutes. Press Ctrl+C to stop.\n")

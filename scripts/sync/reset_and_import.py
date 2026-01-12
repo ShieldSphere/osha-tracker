@@ -18,7 +18,7 @@ from pathlib import Path
 from sqlalchemy import text, select, func
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.database.connection import get_db_session
 from src.database.models import Inspection, Violation, Company

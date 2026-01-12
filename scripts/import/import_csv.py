@@ -1,9 +1,12 @@
 """Import OSHA inspection data from CSV files."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import csv
 import io
 import zipfile
 import httpx
-import sys
 from datetime import datetime
 from typing import Optional
 

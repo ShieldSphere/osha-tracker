@@ -1,3 +1,8 @@
+"""Check if the OSHA API is accessible."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import httpx
 import time
 from src.config import settings

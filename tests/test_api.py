@@ -1,4 +1,8 @@
 """Test to check date distribution in OSHA inspection data."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import httpx
 import time
 from collections import Counter
