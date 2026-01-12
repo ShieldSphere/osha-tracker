@@ -142,28 +142,9 @@ async def list_inspections(
     """
     List inspections with filtering and pagination.
     """
-    # Subquery to get penalty sums and violation count per inspection from violations
-    penalty_subquery = (
-        select(
-            Violation.activity_nr,
-            func.coalesce(func.sum(Violation.current_penalty), 0).label('current_penalty_sum'),
-            func.coalesce(func.sum(Violation.initial_penalty), 0).label('initial_penalty_sum'),
-            func.count(Violation.id).label('violation_count')
-        )
-        .group_by(Violation.activity_nr)
-        .subquery()
-    )
-
-    # Main query with penalty join
-    query = (
-        select(
-            Inspection,
-            func.coalesce(penalty_subquery.c.current_penalty_sum, 0).label('calculated_current'),
-            func.coalesce(penalty_subquery.c.initial_penalty_sum, 0).label('calculated_initial'),
-            func.coalesce(penalty_subquery.c.violation_count, 0).label('violation_count')
-        )
-        .outerjoin(penalty_subquery, Inspection.activity_nr == penalty_subquery.c.activity_nr)
-    )
+    # Simple query - no subqueries for maximum speed
+    # Violation count will be 0 in list view (calculated only in detail view)
+    query = select(Inspection)
 
     # Apply filters
     if state:
@@ -187,20 +168,20 @@ async def list_inspections(
     if insp_type:
         query = query.where(Inspection.insp_type == insp_type)
 
-    # Filter by penalty using calculated penalty from violations
+    # Filter by penalty using stored penalty values (much faster)
     if min_penalty is not None:
-        query = query.where(func.coalesce(penalty_subquery.c.current_penalty_sum, 0) >= min_penalty)
+        query = query.where(Inspection.total_current_penalty >= min_penalty)
 
     if max_penalty is not None:
-        query = query.where(func.coalesce(penalty_subquery.c.current_penalty_sum, 0) <= max_penalty)
+        query = query.where(Inspection.total_current_penalty <= max_penalty)
 
-    # Filter by has violations
+    # Filter by has violations (use penalty as proxy - faster than counting violations)
     if has_violations is True:
-        query = query.where(penalty_subquery.c.current_penalty_sum > 0)
+        query = query.where(Inspection.total_current_penalty > 0)
     elif has_violations is False:
         query = query.where(or_(
-            penalty_subquery.c.current_penalty_sum.is_(None),
-            penalty_subquery.c.current_penalty_sum == 0
+            Inspection.total_current_penalty.is_(None),
+            Inspection.total_current_penalty == 0
         ))
 
     # Filter for companies with multiple inspections
@@ -227,9 +208,10 @@ async def list_inspections(
 
     # Apply sorting
     if sort_by == 'violation_count':
-        sort_column = func.coalesce(penalty_subquery.c.violation_count, 0)
+        # Use penalty as proxy for violation count (faster)
+        sort_column = Inspection.total_current_penalty
     elif sort_by == 'total_current_penalty':
-        sort_column = func.coalesce(penalty_subquery.c.current_penalty_sum, 0)
+        sort_column = Inspection.total_current_penalty
     else:
         sort_column = getattr(Inspection, sort_by, Inspection.open_date)
 
@@ -242,20 +224,25 @@ async def list_inspections(
     offset = (page - 1) * page_size
     query = query.offset(offset).limit(page_size)
 
-    # Execute query - returns tuples of (Inspection, current_penalty, initial_penalty, violation_count)
-    results = db.execute(query).all()
+    # Execute query - returns Inspection objects directly
+    results = db.execute(query).scalars().all()
 
-    # Map results to response, using calculated penalties from violations
+    # Batch fetch violation counts for just this page's inspections (fast - single query)
+    activity_nrs = [r.activity_nr for r in results]
+    violation_counts = {}
+    if activity_nrs:
+        count_query = (
+            select(Violation.activity_nr, func.count(Violation.id))
+            .where(Violation.activity_nr.in_(activity_nrs))
+            .group_by(Violation.activity_nr)
+        )
+        for activity_nr, count in db.execute(count_query).all():
+            violation_counts[activity_nr] = count
+
+    # Map results to response with violation counts
     items = []
-    for row in results:
-        inspection = row[0]
-        calculated_current = row[1] or 0
-        calculated_initial = row[2] or 0
-        viol_count = row[3] or 0
-        # Set penalties and violation count from calculated violations
-        inspection.total_current_penalty = calculated_current
-        inspection.total_initial_penalty = calculated_initial
-        inspection.violation_count = viol_count
+    for inspection in results:
+        inspection.violation_count = violation_counts.get(inspection.activity_nr, 0)
         items.append(inspection)
 
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
@@ -352,34 +339,21 @@ async def get_stats(
         state, city, search, activity_nr, min_penalty, max_penalty, start_date, end_date, insp_type
     )
 
-    # Total inspections
-    count_query = select(func.count(Inspection.id))
+    # Single query to get all stats from inspections table (fast - uses stored penalty values)
+    stats_query = select(
+        func.count(Inspection.id),
+        func.coalesce(func.sum(Inspection.total_current_penalty), 0),
+        func.count(func.distinct(Inspection.site_state)),
+        func.count(Inspection.id).filter(Inspection.total_current_penalty > 0)
+    )
     if conditions:
-        count_query = count_query.where(*conditions)
-    total = db.execute(count_query).scalar()
+        stats_query = stats_query.where(*conditions)
 
-    # Get activity_nrs for filtered inspections (as a scalar subquery)
-    activity_nrs_query = select(Inspection.activity_nr)
-    if conditions:
-        activity_nrs_query = activity_nrs_query.where(*conditions)
-
-    # Total penalties from violations table
-    total_penalties = db.execute(
-        select(func.coalesce(func.sum(Violation.current_penalty), 0))
-        .where(Violation.activity_nr.in_(activity_nrs_query))
-    ).scalar() or 0
-
-    # Unique states in filtered results
-    states_query = select(func.count(func.distinct(Inspection.site_state)))
-    if conditions:
-        states_query = states_query.where(*conditions)
-    states_count = db.execute(states_query).scalar()
-
-    # Count inspections with violations for average
-    inspections_with_violations = db.execute(
-        select(func.count(func.distinct(Violation.activity_nr)))
-        .where(Violation.activity_nr.in_(activity_nrs_query))
-    ).scalar() or 0
+    result = db.execute(stats_query).one()
+    total = result[0]
+    total_penalties = float(result[1])
+    states_count = result[2]
+    inspections_with_violations = result[3]
 
     # Average penalty per inspection with violations
     avg_penalty = total_penalties / inspections_with_violations if inspections_with_violations > 0 else 0
@@ -410,7 +384,7 @@ async def get_stats(
 
     return StatsResponse(
         total_inspections=total,
-        total_penalties=float(total_penalties),
+        total_penalties=total_penalties,
         states_count=states_count,
         avg_penalty=float(avg_penalty),
         inspections_by_state=inspections_by_state,
@@ -433,69 +407,68 @@ async def get_recent_violations(
 
     cutoff_date = dt_date.today() - timedelta(days=days)
 
-    # Get violations issued within the date range
-    violations = db.execute(
-        select(Violation)
+    # Single query with JOIN to get violations with inspection details
+    query = (
+        select(
+            Inspection.id,
+            Inspection.activity_nr,
+            Inspection.estab_name,
+            Inspection.site_city,
+            Inspection.site_state,
+            Inspection.insp_type,
+            Inspection.open_date,
+            func.count(Violation.id).label('violation_count'),
+            func.max(Violation.issuance_date).label('latest_issuance'),
+            func.coalesce(func.sum(Violation.current_penalty), 0).label('total_penalty')
+        )
+        .join(Violation, Inspection.activity_nr == Violation.activity_nr)
         .where(Violation.issuance_date >= cutoff_date)
-        .order_by(desc(Violation.issuance_date))
-    ).scalars().all()
+        .group_by(
+            Inspection.id,
+            Inspection.activity_nr,
+            Inspection.estab_name,
+            Inspection.site_city,
+            Inspection.site_state,
+            Inspection.insp_type,
+            Inspection.open_date
+        )
+    )
 
-    # Group violations by inspection and build inspection filter
-    inspection_map = {}
-    for violation in violations:
-        activity_nr = violation.activity_nr
-        if activity_nr not in inspection_map:
-            inspection_map[activity_nr] = {
-                'violations': [],
-                'total_penalty': 0.0,
-                'latest_issuance': violation.issuance_date
-            }
-        inspection_map[activity_nr]['violations'].append(violation)
-        inspection_map[activity_nr]['total_penalty'] += violation.current_penalty or 0
-        if violation.issuance_date > inspection_map[activity_nr]['latest_issuance']:
-            inspection_map[activity_nr]['latest_issuance'] = violation.issuance_date
+    # Apply filters
+    if state:
+        query = query.where(Inspection.site_state == state.upper())
+    if search:
+        query = query.where(Inspection.estab_name.ilike(f"%{search}%"))
+    if insp_type:
+        query = query.where(Inspection.insp_type == insp_type)
+    if start_date:
+        query = query.where(Inspection.open_date >= start_date)
+    if end_date:
+        query = query.where(Inspection.open_date <= end_date)
 
-    # Build response with inspection details (applying filters)
+    # Order by most recent violation first
+    query = query.order_by(desc('latest_issuance'))
+
+    results = db.execute(query).all()
+
+    # Build response
     items = []
     total_penalties = 0.0
     total_violation_count = 0
 
-    for activity_nr, data in inspection_map.items():
-        # Get inspection details
-        inspection = db.execute(
-            select(Inspection)
-            .where(Inspection.activity_nr == activity_nr)
-        ).scalar_one_or_none()
-
-        if inspection:
-            # Apply filters
-            if state and inspection.site_state != state.upper():
-                continue
-            if search and search.lower() not in (inspection.estab_name or '').lower():
-                continue
-            if insp_type and inspection.insp_type != insp_type:
-                continue
-            if start_date and (not inspection.open_date or inspection.open_date < start_date):
-                continue
-            if end_date and (not inspection.open_date or inspection.open_date > end_date):
-                continue
-
-            total_penalties += data['total_penalty']
-            total_violation_count += len(data['violations'])
-
-            items.append(NewViolationsItem(
-                inspection_id=inspection.id,
-                activity_nr=inspection.activity_nr,
-                estab_name=inspection.estab_name,
-                site_city=inspection.site_city,
-                site_state=inspection.site_state,
-                violation_count=len(data['violations']),
-                issuance_date=data['latest_issuance'].isoformat(),
-                total_current_penalty=data['total_penalty']
-            ))
-
-    # Sort by issuance date (most recent first)
-    items.sort(key=lambda x: x.issuance_date, reverse=True)
+    for row in results:
+        total_penalties += float(row.total_penalty)
+        total_violation_count += row.violation_count
+        items.append(NewViolationsItem(
+            inspection_id=row.id,
+            activity_nr=row.activity_nr,
+            estab_name=row.estab_name,
+            site_city=row.site_city,
+            site_state=row.site_state,
+            violation_count=row.violation_count,
+            issuance_date=row.latest_issuance.isoformat() if row.latest_issuance else '',
+            total_current_penalty=float(row.total_penalty)
+        ))
 
     return NewViolationsResponse(
         count=total_violation_count,

@@ -13,7 +13,7 @@ async def dashboard():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OSHA Tracker Dashboard</title>
+    <title>TSG Safety OSHA Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -47,7 +47,7 @@ async def dashboard():
 <body class="bg-gray-100 min-h-screen">
     <nav class="bg-blue-600 text-white p-4 shadow-lg">
         <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-2xl font-bold">OSHA Tracker</h1>
+            <h1 class="text-2xl font-bold">TSG Safety OSHA Tracker</h1>
             <div class="flex items-center gap-4">
                 <span id="sync-status" class="text-sm"></span>
                 <button onclick="openCRMModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded flex items-center gap-2">
@@ -75,61 +75,53 @@ async def dashboard():
     <main class="container mx-auto p-6">
         <div class="flex flex-col lg:flex-row gap-6">
             <!-- Left Sidebar - Stats Cards -->
-            <div class="lg:w-64 flex-shrink-0">
-                <div class="sticky top-6 space-y-4">
-                    <div class="bg-white p-5 rounded-lg shadow">
-                        <h3 class="text-gray-500 text-xs uppercase tracking-wider mb-1">Data Range</h3>
-                        <p id="stat-date-range" class="text-sm font-medium text-gray-700">Loading...</p>
-                        <p id="stat-date-span" class="text-xs text-gray-500 mt-1"></p>
+            <div class="lg:w-48 flex-shrink-0">
+                <div class="sticky top-6 space-y-2">
+                    <div class="bg-white p-2.5 rounded-lg shadow">
+                        <h3 class="text-gray-500 text-[10px] uppercase tracking-wider mb-0.5">Data Range</h3>
+                        <p id="stat-date-range" class="text-xs font-medium text-gray-700">Loading...</p>
+                        <p id="stat-date-span" class="text-[10px] text-gray-500"></p>
                     </div>
                     <!-- New Inspections Widget -->
-                    <div class="bg-gradient-to-br from-blue-50 to-cyan-50 p-5 rounded-lg shadow border-2 border-blue-200 cursor-pointer hover:shadow-lg transition-shadow" onclick="openNewInspectionsModal()">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-gray-700 text-xs uppercase tracking-wider font-semibold">📋 New Inspections (7d)</h3>
-                        </div>
-                        <p id="new-inspections-count" class="text-2xl font-bold text-blue-600">-</p>
-                        <p id="new-inspections-companies" class="text-xs text-gray-600 mt-1">Loading...</p>
+                    <div class="bg-gradient-to-br from-blue-50 to-cyan-50 p-2.5 rounded-lg shadow border border-blue-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openNewInspectionsModal()">
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">📋 New Inspections (7d)</h3>
+                        <p id="new-inspections-count" class="text-lg font-bold text-blue-600">-</p>
+                        <p id="new-inspections-companies" class="text-[10px] text-gray-600">Loading...</p>
                     </div>
                     <!-- New Violations Widget -->
-                    <div class="bg-gradient-to-br from-orange-50 to-red-50 p-5 rounded-lg shadow border-2 border-orange-200 cursor-pointer hover:shadow-lg transition-shadow" onclick="openNewViolationsModal()">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-gray-700 text-xs uppercase tracking-wider font-semibold">🚨 New Penalties (45d)</h3>
-                        </div>
-                        <p id="new-violations-count" class="text-2xl font-bold text-orange-600">-</p>
-                        <p id="new-violations-companies" class="text-xs text-gray-600 mt-1">Loading...</p>
-                        <p id="new-violations-penalties" class="text-xs text-gray-600"></p>
+                    <div class="bg-gradient-to-br from-orange-50 to-red-50 p-2.5 rounded-lg shadow border border-orange-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openNewViolationsModal()">
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">🚨 New Penalties (45d)</h3>
+                        <p id="new-violations-count" class="text-lg font-bold text-orange-600">-</p>
+                        <p id="new-violations-companies" class="text-[10px] text-gray-600">Loading...</p>
+                        <p id="new-violations-penalties" class="text-[10px] text-gray-600"></p>
                     </div>
                     <!-- CRM Pipeline Widget -->
-                    <div class="bg-gradient-to-br from-purple-50 to-indigo-50 p-5 rounded-lg shadow border-2 border-purple-200 cursor-pointer hover:shadow-lg transition-shadow" onclick="openCRMModal()">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-gray-700 text-xs uppercase tracking-wider font-semibold">👥 CRM Pipeline</h3>
-                        </div>
-                        <p id="crm-total-prospects" class="text-2xl font-bold text-purple-600">-</p>
-                        <p id="crm-pipeline-value" class="text-xs text-gray-600 mt-1">Loading...</p>
+                    <div class="bg-gradient-to-br from-purple-50 to-indigo-50 p-2.5 rounded-lg shadow border border-purple-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openCRMModal()">
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">👥 CRM Pipeline</h3>
+                        <p id="crm-total-prospects" class="text-lg font-bold text-purple-600">-</p>
+                        <p id="crm-pipeline-value" class="text-[10px] text-gray-600">Loading...</p>
                     </div>
                     <!-- Upcoming Callbacks Widget -->
-                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-5 rounded-lg shadow border-2 border-green-200 cursor-pointer hover:shadow-lg transition-shadow" onclick="openCRMModal()">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-gray-700 text-xs uppercase tracking-wider font-semibold">📅 Callbacks (7d)</h3>
-                        </div>
-                        <p id="crm-upcoming-callbacks" class="text-2xl font-bold text-green-600">-</p>
-                        <p id="crm-overdue-callbacks" class="text-xs text-red-600 mt-1"></p>
+                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-2.5 rounded-lg shadow border border-green-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openCRMModal()">
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">📅 Callbacks (7d)</h3>
+                        <p id="crm-upcoming-callbacks" class="text-lg font-bold text-green-600">-</p>
+                        <p id="crm-overdue-callbacks" class="text-[10px] text-red-600"></p>
                     </div>
-                    <div class="bg-white p-5 rounded-lg shadow">
-                        <h3 class="text-gray-500 text-xs uppercase tracking-wider mb-1">Total Inspections</h3>
-                        <p id="stat-total" class="text-2xl font-bold text-blue-600">-</p>
+                    <div class="bg-white p-2.5 rounded-lg shadow">
+                        <h3 class="text-gray-500 text-[10px] uppercase tracking-wider mb-0.5">Total Inspections</h3>
+                        <p id="stat-total" class="text-lg font-bold text-blue-600">-</p>
                     </div>
-                    <div class="bg-white p-5 rounded-lg shadow">
-                        <h3 class="text-gray-500 text-xs uppercase tracking-wider mb-1">Total Penalties</h3>
-                        <p id="stat-penalties" class="text-2xl font-bold text-red-600">-</p>
+                    <div class="bg-white p-2.5 rounded-lg shadow">
+                        <h3 class="text-gray-500 text-[10px] uppercase tracking-wider mb-0.5">Total Penalties</h3>
+                        <p id="stat-penalties" class="text-lg font-bold text-red-600">-</p>
                     </div>
-                    <div class="bg-white p-5 rounded-lg shadow">
-                        <h3 class="text-gray-500 text-xs uppercase tracking-wider mb-1">States Covered</h3>
-                        <p id="stat-states" class="text-2xl font-bold text-green-600">-</p>
+                    <div class="bg-white p-2.5 rounded-lg shadow">
+                        <h3 class="text-gray-500 text-[10px] uppercase tracking-wider mb-0.5">States Covered</h3>
+                        <p id="stat-states" class="text-lg font-bold text-green-600">-</p>
                     </div>
-                    <div class="bg-white p-5 rounded-lg shadow">
-                        <h3 class="text-gray-500 text-xs uppercase tracking-wider mb-1">Avg Penalty</h3>
-                        <p id="stat-avg" class="text-2xl font-bold text-orange-600">-</p>
+                    <div class="bg-white p-2.5 rounded-lg shadow">
+                        <h3 class="text-gray-500 text-[10px] uppercase tracking-wider mb-0.5">Avg Penalty</h3>
+                        <p id="stat-avg" class="text-lg font-bold text-orange-600">-</p>
                     </div>
                 </div>
             </div>
@@ -1202,7 +1194,7 @@ async def dashboard():
             if (!standard) return null;
 
             // Handle format with dots like "1926.1053" or "1910.134(c)(1)"
-            const dotMatch = standard.match(/^(\d{4})\.(\d+)/);
+            const dotMatch = standard.match(/^(\\d{4})\\.(\\d+)/);
             if (dotMatch) {
                 const part = dotMatch[1];
                 // Remove leading zeros from section number
@@ -1540,25 +1532,27 @@ async def dashboard():
                 const container = document.getElementById(`crm-action-buttons-${inspectionId}`);
 
                 if (response.ok) {
-                    const prospect = await response.json();
-                    // Already a prospect - show "View in CRM" button
-                    container.innerHTML = `
-                        <div class="flex items-center gap-2">
-                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(prospect.status)}">
-                                ${formatStatus(prospect.status)}
-                            </span>
-                            <button onclick="openProspectDetail(${prospect.id})"
-                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
-                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                                </svg>
-                                View in CRM
-                            </button>
-                        </div>
-                    `;
+                    const data = await response.json();
+                    if (data.exists) {
+                        // Already a prospect - show "View in CRM" button
+                        container.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(data.status)}">
+                                    ${formatStatus(data.status)}
+                                </span>
+                                <button onclick="openProspectDetail(${data.id})"
+                                    class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                    </svg>
+                                    View in CRM
+                                </button>
+                            </div>
+                        `;
+                    }
+                    // If exists is false, keep the "Add to CRM" button as is
                 }
-                // If 404, keep the "Add to CRM" button as is
             } catch (e) {
                 console.error('Error checking CRM status:', e);
             }

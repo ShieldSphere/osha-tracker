@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager with error handling."""
     # Startup
-    logger.info("Starting OSHA Tracker application...")
+    logger.info("Starting TSG Safety OSHA Tracker application...")
 
     try:
         init_db()
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Shutting down OSHA Tracker application...")
+    logger.info("Shutting down TSG Safety OSHA Tracker application...")
 
     try:
         stop_scheduler()
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="OSHA Tracker",
+    title="TSG Safety OSHA Tracker",
     description="Monitor OSHA inspections and enrich with contact data",
     version="1.0.0",
     lifespan=lifespan,

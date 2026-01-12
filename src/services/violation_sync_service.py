@@ -248,7 +248,7 @@ class ViolationSyncService:
         had_new = False
 
         for api_viol in api_violations:
-            citation_id = str(api_viol.get("citation_id", ""))
+            citation_id = str(api_viol.get("citation_id", "")).lstrip("0") or "0"
             if not citation_id:
                 continue
 
@@ -329,7 +329,7 @@ class ViolationSyncService:
 
         return {
             "activity_nr": activity_nr,
-            "citation_id": str(raw.get("citation_id", "")),
+            "citation_id": str(raw.get("citation_id", "")).lstrip("0") or "0",
             "standard": safe_str(raw.get("standard")),
             "viol_type": safe_str(raw.get("viol_type")),
             "issuance_date": safe_date(raw.get("issuance_date")),

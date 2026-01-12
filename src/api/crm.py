@@ -983,5 +983,10 @@ async def get_prospect_by_inspection(
     ).scalar()
 
     if prospect:
-        return {"exists": True, "prospect_id": prospect.id}
-    return {"exists": False, "prospect_id": None}
+        return {
+            "exists": True,
+            "id": prospect.id,
+            "status": prospect.status.value if prospect.status else "new_lead",
+            "priority": prospect.priority,
+        }
+    return {"exists": False, "id": None}

@@ -58,7 +58,7 @@ class SyncService:
 
         try:
             # Fetch inspections from OSHA API
-            raw_inspections = await self.osha_client.fetch_all_recent_inspections(
+            raw_inspections = await self.osha_client.fetch_all_new_inspections(
                 days_back=days_back
             )
             stats["fetched"] = len(raw_inspections)
