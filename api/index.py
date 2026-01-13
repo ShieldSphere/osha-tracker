@@ -1,40 +1,61 @@
-"""Vercel serverless function entry point."""
-import sys
-import os
+"""Vercel serverless function entry point - minimal test."""
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
-# Ensure the project root is in the path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
+app = FastAPI()
 
-# Set VERCEL env var if not already set (Vercel should set this automatically)
-os.environ.setdefault("VERCEL", "1")
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Minimal Vercel test working"}
 
-try:
-    # Import the FastAPI app
-    from src.main import app
-    handler = app
-except Exception as e:
-    # If import fails, create a minimal app that shows the error
-    from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
-    import traceback
+@app.get("/api/health")
+async def health():
+    return {"status": "healthy"}
 
-    error_app = FastAPI()
-    error_msg = f"{type(e).__name__}: {str(e)}"
-    error_tb = traceback.format_exc()
+@app.get("/test-import")
+async def test_import():
+    """Test importing the main app step by step."""
+    import sys
+    import os
+    results = {"steps": []}
 
-    @error_app.get("/{path:path}")
-    async def catch_all(path: str):
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": error_msg,
-                "traceback": error_tb,
-                "python_path": sys.path,
-                "project_root": project_root,
-                "cwd": os.getcwd(),
-            }
-        )
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, project_root)
+        results["steps"].append({"step": "path_setup", "success": True, "project_root": project_root})
+    except Exception as e:
+        results["steps"].append({"step": "path_setup", "success": False, "error": str(e)})
+        return JSONResponse(status_code=500, content=results)
 
-    app = error_app
-    handler = error_app
+    try:
+        from src.config import settings
+        results["steps"].append({"step": "import_config", "success": True})
+    except Exception as e:
+        results["steps"].append({"step": "import_config", "success": False, "error": str(e)})
+        return JSONResponse(status_code=500, content=results)
+
+    try:
+        from src.database.models import Base
+        results["steps"].append({"step": "import_models", "success": True})
+    except Exception as e:
+        results["steps"].append({"step": "import_models", "success": False, "error": str(e)})
+        return JSONResponse(status_code=500, content=results)
+
+    try:
+        from src.database.connection import engine
+        results["steps"].append({"step": "import_connection", "success": True})
+    except Exception as e:
+        results["steps"].append({"step": "import_connection", "success": False, "error": str(e)})
+        return JSONResponse(status_code=500, content=results)
+
+    try:
+        from src.main import app as main_app
+        results["steps"].append({"step": "import_main", "success": True})
+    except Exception as e:
+        results["steps"].append({"step": "import_main", "success": False, "error": str(e)})
+        return JSONResponse(status_code=500, content=results)
+
+    results["all_imports_successful"] = True
+    return results
+
+handler = app
