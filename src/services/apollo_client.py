@@ -285,3 +285,70 @@ class ApolloClient:
             "departments": ",".join(raw.get("departments", [])) if raw.get("departments") else None,
             "contact_type": contact_type,
         }
+
+    async def reveal_contact_info(self, person_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Reveal email and phone for a specific person (uses credits).
+
+        Args:
+            person_id: Apollo person ID
+
+        Returns:
+            Person data with revealed email/phone
+        """
+        url = f"{self.base_url}/people/match"
+
+        payload = {
+            "api_key": self.api_key,
+            "id": person_id,
+            "reveal_personal_emails": True,
+            "reveal_phone_number": True,
+        }
+
+        logger.info(f"Revealing contact info for person_id: {person_id}")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.post(
+                    url, headers=self.headers, json=payload
+                )
+
+                if response.status_code != 200:
+                    logger.error(f"Apollo reveal response: {response.text}")
+
+                response.raise_for_status()
+                data = response.json()
+
+                person = data.get("person")
+                if person:
+                    logger.info(f"Revealed contact info for: {person.get('name')}")
+                return person
+
+            except httpx.HTTPStatusError as e:
+                logger.error(f"HTTP error revealing contact: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
+                raise
+            except httpx.RequestError as e:
+                logger.error(f"Request error revealing contact: {e}")
+                raise
+
+    async def bulk_reveal_contacts(self, person_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Reveal email and phone for multiple people (uses credits per person).
+
+        Args:
+            person_ids: List of Apollo person IDs
+
+        Returns:
+            List of person data with revealed email/phone
+        """
+        revealed = []
+        for person_id in person_ids:
+            try:
+                person = await self.reveal_contact_info(person_id)
+                if person:
+                    revealed.append(person)
+            except Exception as e:
+                logger.error(f"Failed to reveal contact {person_id}: {e}")
+                # Continue with other contacts
+        return revealed

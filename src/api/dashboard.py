@@ -1465,6 +1465,7 @@ async def osha_dashboard():
         let currentEnrichmentPreview = null;
         let currentWebEnrichmentResult = null;
         let currentApolloResult = null;
+        let revealedContacts = [];  // Contacts with revealed email/phone from Step 2
 
         async function enrichInspection(inspectionId) {
             const btn = document.getElementById(`enrich-btn-${inspectionId}`);
@@ -1485,6 +1486,7 @@ async def osha_dashboard():
                 currentEnrichmentPreview = preview;
                 currentWebEnrichmentResult = null;
                 currentApolloResult = null;
+                revealedContacts = [];  // Clear revealed contacts for new enrichment
 
                 // Show the enrichment preview modal
                 showEnrichmentPreviewModal(preview);
@@ -1660,6 +1662,7 @@ async def osha_dashboard():
             currentEnrichmentPreview = null;
             currentWebEnrichmentResult = null;
             currentApolloResult = null;
+            revealedContacts = [];  // Clear revealed contacts when closing modal
         }
 
         async function runFullEnrichment(inspectionId) {
@@ -1775,6 +1778,7 @@ async def osha_dashboard():
                 if (apolloResult.success && apolloResult.organization) {
                     const org = apolloResult.organization;
                     const people = apolloResult.people;
+                    const allContacts = [...(people?.safety_contacts || []), ...(people?.executive_contacts || [])];
 
                     apolloResultContainer.innerHTML = `
                         <div class="bg-indigo-50 rounded-lg p-4">
@@ -1783,7 +1787,7 @@ async def osha_dashboard():
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                                 </svg>
                                 <h3 class="font-medium text-indigo-900">Apollo Match Found</h3>
-                                <span class="text-xs text-indigo-600">(${apolloResult.credits_used} credits used)</span>
+                                <span class="text-xs text-indigo-600">(${apolloResult.credits_used} credits used for search)</span>
                             </div>
                             <div class="text-sm space-y-2 mb-4">
                                 <p><strong>Company:</strong> ${escapeHtml(org.name || 'Unknown')}</p>
@@ -1793,31 +1797,50 @@ async def osha_dashboard():
                                 ${org.phone ? `<p><strong>Phone:</strong> ${escapeHtml(org.phone)}</p>` : ''}
                                 ${org.city && org.state ? `<p><strong>Location:</strong> ${escapeHtml(org.city)}, ${escapeHtml(org.state)}</p>` : ''}
                             </div>
-                            ${people?.safety_contacts?.length || people?.executive_contacts?.length ? `
+                            ${allContacts.length ? `
                                 <div class="border-t border-indigo-200 pt-3 mb-4">
-                                    <p class="font-medium text-indigo-900 mb-2">Contacts Found (${(people.safety_contacts?.length || 0) + (people.executive_contacts?.length || 0)}):</p>
-                                    <ul class="text-sm space-y-1">
-                                        ${(people.safety_contacts || []).slice(0, 3).map(c => `
-                                            <li class="flex items-center gap-2">
-                                                <span class="px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded">Safety</span>
-                                                ${escapeHtml(c.full_name || '')} - ${escapeHtml(c.title || '')}
-                                            </li>
-                                        `).join('')}
-                                        ${(people.executive_contacts || []).slice(0, 3).map(c => `
-                                            <li class="flex items-center gap-2">
-                                                <span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-xs rounded">Exec</span>
-                                                ${escapeHtml(c.full_name || '')} - ${escapeHtml(c.title || '')}
-                                            </li>
-                                        `).join('')}
-                                    </ul>
+                                    <div class="flex justify-between items-center mb-2">
+                                        <p class="font-medium text-indigo-900">Contacts Found (${allContacts.length}):</p>
+                                        <label class="flex items-center gap-1 text-xs text-indigo-700 cursor-pointer">
+                                            <input type="checkbox" id="select-all-contacts" onchange="toggleAllContacts(this.checked)" class="rounded">
+                                            Select All
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mb-2">Select contacts to reveal their email/phone (1 credit per contact)</p>
+                                    <div class="space-y-2 max-h-48 overflow-y-auto">
+                                        ${allContacts.map((c, idx) => {
+                                            const isSafety = (people?.safety_contacts || []).includes(c);
+                                            return `
+                                            <label class="flex items-center gap-2 p-2 bg-white rounded border hover:bg-gray-50 cursor-pointer">
+                                                <input type="checkbox" class="contact-checkbox rounded" value="${escapeHtml(c.apollo_person_id || '')}" data-idx="${idx}">
+                                                <span class="px-1.5 py-0.5 ${isSafety ? 'bg-green-100 text-green-800' : 'bg-purple-100 text-purple-800'} text-xs rounded">${isSafety ? 'Safety' : 'Exec'}</span>
+                                                <div class="flex-1 min-w-0">
+                                                    <div class="font-medium text-sm truncate">${escapeHtml(c.full_name || 'Unknown')}</div>
+                                                    <div class="text-xs text-gray-500 truncate">${escapeHtml(c.title || 'No title')}</div>
+                                                </div>
+                                                ${c.email ? '<span class="text-xs text-green-600">Has email</span>' : '<span class="text-xs text-gray-400">No email yet</span>'}
+                                            </label>
+                                        `}).join('')}
+                                    </div>
+                                    <button id="reveal-contacts-btn" onclick="revealSelectedContacts(${inspectionId})"
+                                        class="w-full mt-3 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled>
+                                        Reveal Email/Phone for Selected (0 credits)
+                                    </button>
                                 </div>
-                            ` : ''}
+                            ` : '<p class="text-sm text-gray-500 mb-4">No contacts found at this company</p>'}
+                            <div id="revealed-contacts-container" class="hidden mb-4"></div>
                             <button id="confirm-save-btn" onclick="confirmAndSaveEnrichment(${inspectionId})"
                                 class="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
-                                Confirm & Save to Database
+                                Save Company to Database
                             </button>
                         </div>
                     `;
+
+                    // Add event listeners for checkbox changes
+                    document.querySelectorAll('.contact-checkbox').forEach(cb => {
+                        cb.addEventListener('change', updateRevealButtonState);
+                    });
 
                     btn.innerHTML = `Search Complete`;
                     btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
@@ -1845,6 +1868,92 @@ async def osha_dashboard():
             }
         }
 
+        function toggleAllContacts(checked) {
+            document.querySelectorAll('.contact-checkbox').forEach(cb => {
+                cb.checked = checked;
+            });
+            updateRevealButtonState();
+        }
+
+        function updateRevealButtonState() {
+            const checkboxes = document.querySelectorAll('.contact-checkbox:checked');
+            const btn = document.getElementById('reveal-contacts-btn');
+            if (btn) {
+                const count = checkboxes.length;
+                btn.disabled = count === 0;
+                btn.textContent = `Reveal Email/Phone for Selected (${count} credit${count !== 1 ? 's' : ''})`;
+            }
+        }
+
+        async function revealSelectedContacts(inspectionId) {
+            const checkboxes = document.querySelectorAll('.contact-checkbox:checked');
+            const personIds = Array.from(checkboxes).map(cb => cb.value).filter(id => id);
+
+            if (personIds.length === 0) {
+                alert('Please select at least one contact to reveal');
+                return;
+            }
+
+            const btn = document.getElementById('reveal-contacts-btn');
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Revealing ${personIds.length} contact${personIds.length !== 1 ? 's' : ''}...
+            `;
+
+            try {
+                const response = await fetch('/api/enrichment/reveal-contacts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ person_ids: personIds })
+                });
+
+                const result = await response.json();
+
+                if (result.success && result.contacts.length > 0) {
+                    revealedContacts = result.contacts;
+
+                    // Show revealed contacts
+                    const container = document.getElementById('revealed-contacts-container');
+                    container.classList.remove('hidden');
+                    container.innerHTML = `
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <h4 class="font-medium text-green-900 mb-2">Revealed Contacts (${result.credits_used} credits used)</h4>
+                            <div class="space-y-2">
+                                ${result.contacts.map(c => `
+                                    <div class="bg-white rounded border p-2 text-sm">
+                                        <div class="font-medium">${escapeHtml(c.full_name || 'Unknown')}</div>
+                                        <div class="text-gray-600">${escapeHtml(c.title || '')}</div>
+                                        ${c.email ? `<div class="text-blue-600"><a href="mailto:${c.email}">${escapeHtml(c.email)}</a></div>` : '<div class="text-gray-400">No email</div>'}
+                                        ${c.phone ? `<div class="text-blue-600"><a href="tel:${c.phone}">${escapeHtml(c.phone)}</a></div>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+
+                    btn.textContent = `${result.contacts.length} Contact${result.contacts.length !== 1 ? 's' : ''} Revealed`;
+                    btn.classList.remove('bg-orange-500', 'hover:bg-orange-600');
+                    btn.classList.add('bg-green-500');
+
+                    // Uncheck revealed contacts
+                    checkboxes.forEach(cb => cb.checked = false);
+                } else {
+                    alert(result.error || 'Failed to reveal contacts');
+                    btn.disabled = false;
+                    btn.textContent = 'Reveal Email/Phone for Selected (0 credits)';
+                }
+            } catch (e) {
+                console.error('Error revealing contacts:', e);
+                alert('Error revealing contacts: ' + e.message);
+                btn.disabled = false;
+                btn.textContent = 'Reveal Email/Phone for Selected (0 credits)';
+            }
+        }
+
         async function confirmAndSaveEnrichment(inspectionId) {
             console.log('confirmAndSaveEnrichment called, inspectionId:', inspectionId);
             console.log('currentApolloResult:', currentApolloResult);
@@ -1867,13 +1976,32 @@ async def osha_dashboard():
             }
 
             try {
-                // Combine all contacts
-                const contacts = [
+                // Combine all contacts from initial search
+                let contacts = [
                     ...(currentApolloResult.people?.safety_contacts || []),
                     ...(currentApolloResult.people?.executive_contacts || [])
                 ];
 
-                console.log('Sending to API:', { organization: currentApolloResult.organization, contacts });
+                // Merge revealed contact data (email/phone) into the original contacts
+                if (revealedContacts.length > 0) {
+                    contacts = contacts.map(contact => {
+                        // Find if this contact was revealed
+                        const revealed = revealedContacts.find(r => r.apollo_person_id === contact.apollo_person_id);
+                        if (revealed) {
+                            // Merge revealed data (email, phone) into the contact
+                            return {
+                                ...contact,
+                                email: revealed.email || contact.email,
+                                email_status: revealed.email_status || contact.email_status,
+                                phone: revealed.phone || contact.phone,
+                                mobile_phone: revealed.mobile_phone || contact.mobile_phone
+                            };
+                        }
+                        return contact;
+                    });
+                }
+
+                console.log('Sending to API:', { organization: currentApolloResult.organization, contacts, revealedCount: revealedContacts.length });
 
                 const response = await fetch(`/api/enrichment/confirm/${inspectionId}`, {
                     method: 'POST',
@@ -2783,6 +2911,7 @@ async def osha_dashboard():
                 currentEnrichmentPreview = preview;
                 currentWebEnrichmentResult = null;
                 currentApolloResult = null;
+                revealedContacts = [];  // Clear revealed contacts for re-enrichment
 
                 // Mark that this is a re-enrichment and include existing website/domain
                 preview.isReEnrich = true;

@@ -438,6 +438,65 @@ async def confirm_enrichment(
             )
 
 
+class RevealContactsRequest(BaseModel):
+    """Request body for revealing contact info."""
+    person_ids: List[str]
+
+
+@router.post("/reveal-contacts")
+async def reveal_contacts(request: RevealContactsRequest):
+    """
+    Reveal email and phone for selected contacts (uses Apollo credits).
+
+    This is Step 2 of the enrichment process - only called for contacts
+    the user explicitly selects to reveal.
+    """
+    if not request.person_ids:
+        return {
+            "success": False,
+            "contacts": [],
+            "error": "No person IDs provided",
+            "credits_used": 0,
+        }
+
+    apollo_client = ApolloClient()
+
+    try:
+        revealed = []
+        credits_used = 0
+
+        for person_id in request.person_ids:
+            try:
+                person = await apollo_client.reveal_contact_info(person_id)
+                if person:
+                    # Determine contact type based on title
+                    title = (person.get("title") or "").lower()
+                    safety_keywords = ["safety", "ehs", "compliance", "risk", "health"]
+                    contact_type = "safety" if any(kw in title for kw in safety_keywords) else "executive"
+
+                    revealed.append(apollo_client.parse_person(person, contact_type))
+                    credits_used += 1
+            except Exception as e:
+                logger.error(f"Failed to reveal contact {person_id}: {e}")
+                # Continue with other contacts
+
+        return {
+            "success": True,
+            "contacts": revealed,
+            "error": None,
+            "credits_used": credits_used,
+        }
+
+    except Exception as e:
+        logger.error(f"Error revealing contacts: {e}")
+        return {
+            "success": False,
+            "contacts": [],
+            "error": str(e),
+            "credits_used": 0,
+        }
+
+
 @router.get("/stats")
 async def get_enrichment_stats():
     """Get statistics about enrichment status."""

@@ -225,6 +225,22 @@ async def crm_page():
         </div>
     </div>
 
+    <!-- Company Info Modal -->
+    <div id="company-info-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] flex flex-col">
+            <div class="p-6 border-b flex justify-between items-center">
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-800">Company Information</h2>
+                    <p class="text-sm text-gray-600 mt-1">OSHA inspection details, enriched company data, and contacts</p>
+                </div>
+                <button onclick="closeCompanyInfoModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            <div class="flex-1 overflow-auto p-6" id="company-info-content">
+                <!-- Content loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
     <script>
         const CRM_API = '/api/crm';
         let searchTimeout = null;
@@ -555,8 +571,9 @@ async def crm_page():
                             <div class="text-gray-900">${escapeHtml(p.next_action || '-')}</div>
                             ${p.next_action_date ? `<div class="text-xs text-gray-500">${new Date(p.next_action_date).toLocaleDateString()}</div>` : ''}
                         </td>
-                        <td class="px-4 py-4 text-center">
-                            <button onclick="event.stopPropagation(); openProspectDetail(${p.id})" class="text-purple-600 hover:text-purple-800 text-sm font-medium">View</button>
+                        <td class="px-4 py-4 text-center space-x-2">
+                            <button onclick="event.stopPropagation(); viewCompanyInfo(${p.inspection_id})" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Company</button>
+                            <button onclick="event.stopPropagation(); openProspectDetail(${p.id})" class="text-purple-600 hover:text-purple-800 text-sm font-medium">Prospect</button>
                         </td>
                     </tr>
                 `).join('');
@@ -689,11 +706,22 @@ async def crm_page():
                 const response = await fetch(`${CRM_API}/prospects/${prospectId}`);
                 const prospect = await response.json();
 
+                // Store inspection_id for viewing company info
+                window.currentInspectionId = prospect.inspection_id;
+
                 document.getElementById('prospect-title').textContent = prospect.estab_name || 'Prospect Details';
                 document.getElementById('prospect-subtitle').textContent =
                     `${prospect.site_city || ''}${prospect.site_city && prospect.site_state ? ', ' : ''}${prospect.site_state || ''} | ${prospect.activity_nr || ''}`;
 
                 document.getElementById('prospect-content').innerHTML = `
+                    <!-- View Company Info Button -->
+                    <div class="mb-4 pb-4 border-b">
+                        <button onclick="viewCompanyInfo(${prospect.inspection_id})" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-sm font-medium">
+                            View Company Info
+                        </button>
+                        <span class="ml-2 text-sm text-gray-500">View enriched company details, contacts, and OSHA inspection info</span>
+                    </div>
+
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <!-- Left: Status & Info -->
                         <div class="space-y-4">
@@ -931,6 +959,176 @@ async def crm_page():
                 console.error('Error scheduling callback:', e);
             }
         }
+
+        // View Company Info function
+        async function viewCompanyInfo(inspectionId) {
+            // Show company info modal
+            document.getElementById('company-info-modal').classList.remove('hidden');
+            document.getElementById('company-info-content').innerHTML = '<div class="text-center py-8 text-gray-500">Loading company information...</div>';
+
+            try {
+                // Fetch inspection details
+                const inspectionResponse = await fetch(`/api/inspections/${inspectionId}`);
+                const inspection = await inspectionResponse.json();
+
+                // Fetch company details (linked to inspection) - includes contacts
+                const companyResponse = await fetch(`/api/inspections/${inspectionId}/company`);
+                let company = null;
+                let contacts = [];
+                if (companyResponse.ok) {
+                    company = await companyResponse.json();
+                    // Contacts are included in the company response
+                    contacts = company?.contacts || [];
+                }
+
+                // Build the modal content
+                let html = '<div class="space-y-6">';
+
+                // OSHA Inspection Info
+                html += `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-red-800 mb-3">OSHA Inspection Details</h4>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="text-gray-600">Establishment:</span>
+                                <span class="font-medium ml-2">${escapeHtml(inspection.estab_name || 'N/A')}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Activity #:</span>
+                                <span class="font-medium ml-2">${escapeHtml(inspection.activity_nr || 'N/A')}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Location:</span>
+                                <span class="font-medium ml-2">${escapeHtml(inspection.site_city || '')}${inspection.site_city && inspection.site_state ? ', ' : ''}${escapeHtml(inspection.site_state || '')}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Address:</span>
+                                <span class="font-medium ml-2">${escapeHtml(inspection.site_address || 'N/A')}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Open Date:</span>
+                                <span class="font-medium ml-2">${inspection.open_date ? new Date(inspection.open_date).toLocaleDateString() : 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-gray-600">Total Penalty:</span>
+                                <span class="font-medium ml-2 text-red-600">$${(inspection.total_current_penalty || 0).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Company Info (if enriched)
+                if (company) {
+                    html += `
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-800 mb-3">Enriched Company Data</h4>
+                            <div class="grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                    <span class="text-gray-600">Company Name:</span>
+                                    <span class="font-medium ml-2">${escapeHtml(company.name || 'N/A')}</span>
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">Domain:</span>
+                                    ${company.domain ? `<a href="https://${company.domain}" target="_blank" class="font-medium ml-2 text-blue-600 hover:underline">${escapeHtml(company.domain)}</a>` : '<span class="ml-2 text-gray-400">N/A</span>'}
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">Industry:</span>
+                                    <span class="font-medium ml-2">${escapeHtml(company.industry || 'N/A')}</span>
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">Sub-Industry:</span>
+                                    <span class="font-medium ml-2">${escapeHtml(company.sub_industry || 'N/A')}</span>
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">Employees:</span>
+                                    <span class="font-medium ml-2">${company.employee_count ? company.employee_count.toLocaleString() : (company.employee_range || 'N/A')}</span>
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">Revenue:</span>
+                                    <span class="font-medium ml-2">${company.revenue_range || (company.annual_revenue ? '$' + company.annual_revenue.toLocaleString() : 'N/A')}</span>
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">Phone:</span>
+                                    ${company.phone ? `<a href="tel:${company.phone}" class="font-medium ml-2 text-blue-600">${escapeHtml(company.phone)}</a>` : '<span class="ml-2 text-gray-400">N/A</span>'}
+                                </div>
+                                <div>
+                                    <span class="text-gray-600">LinkedIn:</span>
+                                    ${company.linkedin_url ? `<a href="${company.linkedin_url}" target="_blank" class="font-medium ml-2 text-blue-600 hover:underline">View Profile</a>` : '<span class="ml-2 text-gray-400">N/A</span>'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <h4 class="font-semibold text-gray-700 mb-2">Company Not Enriched</h4>
+                            <p class="text-sm text-gray-600">This company has not been enriched with Apollo data yet. Go to the OSHA dashboard to enrich this company.</p>
+                        </div>
+                    `;
+                }
+
+                // Contacts (if any)
+                if (contacts && contacts.length > 0) {
+                    html += `
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <h4 class="font-semibold text-green-800 mb-3">Contacts (${contacts.length})</h4>
+                            <div class="space-y-3">
+                    `;
+                    for (const contact of contacts) {
+                        html += `
+                            <div class="bg-white rounded border p-3">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="font-medium">${escapeHtml(contact.full_name || (contact.first_name + ' ' + contact.last_name) || 'Unknown')}</div>
+                                        <div class="text-sm text-gray-600">${escapeHtml(contact.title || 'N/A')}</div>
+                                    </div>
+                                    <span class="px-2 py-0.5 text-xs rounded ${contact.contact_type === 'safety' ? 'bg-orange-100 text-orange-800' : 'bg-purple-100 text-purple-800'}">${contact.contact_type || 'other'}</span>
+                                </div>
+                                <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                                    <div>
+                                        <span class="text-gray-500">Email:</span>
+                                        ${contact.email ? `<a href="mailto:${contact.email}" class="text-blue-600 hover:underline ml-1">${escapeHtml(contact.email)}</a>` : '<span class="text-gray-400 ml-1">N/A</span>'}
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">Phone:</span>
+                                        ${contact.phone ? `<a href="tel:${contact.phone}" class="text-blue-600 ml-1">${escapeHtml(contact.phone)}</a>` : '<span class="text-gray-400 ml-1">N/A</span>'}
+                                    </div>
+                                    ${contact.linkedin_url ? `
+                                        <div class="col-span-2">
+                                            <a href="${contact.linkedin_url}" target="_blank" class="text-blue-600 hover:underline text-sm">View LinkedIn Profile</a>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    html += '</div></div>';
+                } else if (company) {
+                    html += `
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                            <h4 class="font-semibold text-gray-700 mb-2">No Contacts Found</h4>
+                            <p class="text-sm text-gray-600">No contacts have been saved for this company yet.</p>
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+
+                document.getElementById('company-info-content').innerHTML = html;
+            } catch (e) {
+                console.error('Error loading company info:', e);
+                document.getElementById('company-info-content').innerHTML = '<div class="text-red-500 text-center py-8">Error loading company information</div>';
+            }
+        }
+
+        function closeCompanyInfoModal() {
+            document.getElementById('company-info-modal').classList.add('hidden');
+        }
+
+        // Close company info modal on backdrop click
+        document.getElementById('company-info-modal')?.addEventListener('click', e => {
+            if (e.target.id === 'company-info-modal') closeCompanyInfoModal();
+        });
     </script>
 </body>
 </html>

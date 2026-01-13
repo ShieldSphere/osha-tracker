@@ -1101,10 +1101,12 @@ async def get_inspection_company(inspection_id: int, db: Session = Depends(get_d
 @router.get("/companies/enriched", response_model=EnrichedCompaniesResponse)
 async def get_enriched_companies(
     contacted_filter: Optional[str] = Query(None, description="Filter: 'contacted', 'not_contacted', or None for all"),
+    exclude_in_crm: bool = Query(True, description="Exclude companies already added to CRM"),
     db: Session = Depends(get_db)
 ):
     """Get all enriched companies with their inspection info."""
     from sqlalchemy.orm import joinedload
+    from src.database.models import Prospect
 
     query = select(Company).options(joinedload(Company.inspection))
 
@@ -1113,6 +1115,11 @@ async def get_enriched_companies(
         query = query.where(Company.contacted == True)
     elif contacted_filter == "not_contacted":
         query = query.where((Company.contacted == False) | (Company.contacted == None))
+
+    # Exclude companies whose inspections are already in the CRM (have prospects)
+    if exclude_in_crm:
+        prospect_inspection_ids = select(Prospect.inspection_id)
+        query = query.where(~Company.inspection_id.in_(prospect_inspection_ids))
 
     # Order by most recent first
     query = query.order_by(desc(Company.created_at))
