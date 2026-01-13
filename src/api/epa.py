@@ -324,16 +324,6 @@ async def get_laws():
         ]
 
 
-@router.get("/{case_id}", response_model=EPACaseResponse)
-async def get_case(case_id: int):
-    """Get a specific EPA case by ID."""
-    with get_db_session() as db:
-        case = db.query(EPACase).filter(EPACase.id == case_id).first()
-        if not case:
-            raise HTTPException(status_code=404, detail="Case not found")
-        return case_to_response(case)
-
-
 @router.post("/sync", response_model=SyncResponse)
 async def sync_cases(
     background_tasks: BackgroundTasks,
@@ -394,3 +384,13 @@ async def get_recent_cases(days: int = Query(30, ge=1, le=365)):
             "days": days,
             "items": [case_to_response(c) for c in cases]
         }
+
+
+@router.get("/{case_id}", response_model=EPACaseResponse)
+async def get_case(case_id: int):
+    """Get a specific EPA case by ID."""
+    with get_db_session() as db:
+        case = db.query(EPACase).filter(EPACase.id == case_id).first()
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+        return case_to_response(case)
