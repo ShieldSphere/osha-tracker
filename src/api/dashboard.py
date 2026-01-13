@@ -2482,14 +2482,34 @@ async def osha_dashboard():
                 if (response.ok) {
                     const result = await response.json();
                     alert('Company added to CRM as a new lead!');
-                    // Optionally redirect to CRM or update button state
-                    const btn = document.querySelector(`[onclick="addCompanyToCRM(${inspectionId})"]`);
+
+                    // Remove the row from the enriched companies table
+                    const tableRow = document.querySelector(`tr [onclick="addCompanyToCRM(${inspectionId})"]`)?.closest('tr');
+                    if (tableRow) {
+                        tableRow.remove();
+                        // Update the count
+                        const countEl = document.getElementById('enriched-count');
+                        if (countEl) {
+                            const currentText = countEl.textContent;
+                            const match = currentText.match(/\((\d+)/);
+                            if (match) {
+                                const newCount = parseInt(match[1]) - 1;
+                                countEl.textContent = `(${newCount} companies)`;
+                            }
+                        }
+                    }
+
+                    // Also update button in company detail modal if open
+                    const btn = document.getElementById(`add-to-crm-btn-${inspectionId}`);
                     if (btn) {
-                        btn.textContent = 'Added to CRM';
+                        btn.innerHTML = 'Added to CRM';
                         btn.disabled = true;
                         btn.classList.remove('bg-green-600', 'hover:bg-green-700');
                         btn.classList.add('bg-gray-400', 'cursor-not-allowed');
                     }
+
+                    // Close the company detail modal if open
+                    closeCompanyDetailModal();
                 } else {
                     const error = await response.json();
                     if (error.detail && error.detail.includes('already exists')) {
