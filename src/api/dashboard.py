@@ -1605,6 +1605,23 @@ async def osha_dashboard():
                             </div>
                         </div>
 
+                        <!-- Existing Website (for re-enrichment) -->
+                        ${preview.existingWebsite || preview.existingDomain ? `
+                            <div class="bg-green-50 rounded-lg p-4 border border-green-200">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                    <h3 class="font-medium text-green-900">Using Saved Website</h3>
+                                </div>
+                                <p class="text-sm text-green-800">
+                                    ${preview.existingWebsite ? `<a href="${preview.existingWebsite}" target="_blank" class="text-blue-600 hover:underline">${escapeHtml(preview.existingWebsite)}</a>` : ''}
+                                    ${!preview.existingWebsite && preview.existingDomain ? `Domain: ${escapeHtml(preview.existingDomain)}` : ''}
+                                </p>
+                                <p class="text-xs text-green-700 mt-1">Apollo will search using this domain for accurate results</p>
+                            </div>
+                        ` : ''}
+
                         <!-- Recommendation -->
                         <div class="bg-indigo-50 rounded-lg p-4">
                             <p class="text-sm font-medium text-indigo-900">${escapeHtml(preview.recommendation_reason)}</p>
@@ -1660,65 +1677,101 @@ async def osha_dashboard():
 
             btn.disabled = true;
 
-            // Step 1: Web search to find domain
-            btn.innerHTML = `
-                <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                </svg>
-                Step 1: Finding website...
-            `;
+            // Check if we have an existing domain from re-enrichment
+            const existingDomain = currentEnrichmentPreview?.existingDomain;
+            const existingWebsite = currentEnrichmentPreview?.existingWebsite;
+            let domainForApollo = null;
 
-            try {
-                // Run web enrichment first
-                const webResult = await fetch(`/api/enrichment/web-enrich/${inspectionId}`, { method: 'POST' }).then(r => r.json());
-                currentWebEnrichmentResult = webResult;
-
-                // Show web search results
+            if (existingDomain || existingWebsite) {
+                // Use existing domain - skip web search
                 webResultContainer.classList.remove('hidden');
-                if (webResult.website_url) {
-                    webResultContainer.innerHTML = `
-                        <div class="bg-green-50 rounded-lg p-4">
-                            <div class="flex items-center gap-2 mb-2">
-                                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                </svg>
-                                <h3 class="font-medium text-green-900">Website Found</h3>
-                            </div>
-                            <p class="text-sm"><a href="${webResult.website_url}" target="_blank" class="text-blue-600 hover:underline">${escapeHtml(webResult.website_url)}</a></p>
+                webResultContainer.innerHTML = `
+                    <div class="bg-green-50 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <h3 class="font-medium text-green-900">Using Saved Website</h3>
                         </div>
-                    `;
-                } else {
-                    webResultContainer.innerHTML = `
-                        <div class="bg-yellow-50 rounded-lg p-4">
-                            <div class="flex items-center gap-2 mb-2">
-                                <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                                </svg>
-                                <h3 class="font-medium text-yellow-900">No Website Found</h3>
-                            </div>
-                            <p class="text-sm text-yellow-700">Will search Apollo by company name (less accurate)</p>
-                        </div>
-                    `;
-                }
+                        <p class="text-sm text-green-700">Skipping web search - using saved domain for Apollo</p>
+                    </div>
+                `;
 
-                // Step 2: Apollo search using domain if found
+                // Extract domain from existing website or use existing domain directly
+                if (existingWebsite) {
+                    try {
+                        domainForApollo = new URL(existingWebsite).hostname.replace('www.', '');
+                    } catch (e) {
+                        domainForApollo = existingDomain;
+                    }
+                } else {
+                    domainForApollo = existingDomain;
+                }
+            } else {
+                // Step 1: Web search to find domain
                 btn.innerHTML = `
                     <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                     </svg>
-                    Step 2: Searching Apollo...
+                    Step 1: Finding website...
                 `;
 
-                let apolloUrl = `/api/enrichment/apollo-search/${inspectionId}`;
-                if (webResult.website_url) {
-                    try {
-                        const domain = new URL(webResult.website_url).hostname.replace('www.', '');
-                        apolloUrl += `?domain=${encodeURIComponent(domain)}`;
-                    } catch (e) {
-                        console.warn('Could not parse website URL for domain:', e);
+                try {
+                    // Run web enrichment first
+                    const webResult = await fetch(`/api/enrichment/web-enrich/${inspectionId}`, { method: 'POST' }).then(r => r.json());
+                    currentWebEnrichmentResult = webResult;
+
+                    // Show web search results
+                    webResultContainer.classList.remove('hidden');
+                    if (webResult.website_url) {
+                        webResultContainer.innerHTML = `
+                            <div class="bg-green-50 rounded-lg p-4">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                    <h3 class="font-medium text-green-900">Website Found</h3>
+                                </div>
+                                <p class="text-sm"><a href="${webResult.website_url}" target="_blank" class="text-blue-600 hover:underline">${escapeHtml(webResult.website_url)}</a></p>
+                            </div>
+                        `;
+                        try {
+                            domainForApollo = new URL(webResult.website_url).hostname.replace('www.', '');
+                        } catch (e) {
+                            console.warn('Could not parse website URL for domain:', e);
+                        }
+                    } else {
+                        webResultContainer.innerHTML = `
+                            <div class="bg-yellow-50 rounded-lg p-4">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                    </svg>
+                                    <h3 class="font-medium text-yellow-900">No Website Found</h3>
+                                </div>
+                                <p class="text-sm text-yellow-700">Will search Apollo by company name (less accurate)</p>
+                            </div>
+                        `;
                     }
+                } catch (e) {
+                    console.error('Web enrichment error:', e);
+                }
+            }
+
+            // Step 2: Apollo search using domain if found
+            btn.innerHTML = `
+                <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Searching Apollo...
+            `;
+
+            try {
+                let apolloUrl = `/api/enrichment/apollo-search/${inspectionId}`;
+                if (domainForApollo) {
+                    apolloUrl += `?domain=${encodeURIComponent(domainForApollo)}`;
                 }
 
                 const apolloResult = await fetch(apolloUrl, { method: 'POST' }).then(r => r.json());
@@ -2671,14 +2724,25 @@ async def osha_dashboard():
 
             // Open the enrichment preview modal (same flow as new enrichment)
             try {
-                const preview = await fetch(`/api/enrichment/preview/${inspectionId}`).then(r => r.json());
+                // Fetch both the preview and existing company data
+                const [preview, companyData] = await Promise.all([
+                    fetch(`/api/enrichment/preview/${inspectionId}`).then(r => r.json()),
+                    fetch(`/api/inspections/${inspectionId}/company`).then(r => r.json())
+                ]);
+
                 currentEnrichmentPreview = preview;
                 currentWebEnrichmentResult = null;
                 currentApolloResult = null;
 
-                // Mark that this is a re-enrichment
+                // Mark that this is a re-enrichment and include existing website/domain
                 preview.isReEnrich = true;
                 preview.existingCompanyId = companyId;
+
+                // Pass existing website/domain for Apollo search
+                if (companyData && (companyData.website || companyData.domain)) {
+                    preview.existingWebsite = companyData.website;
+                    preview.existingDomain = companyData.domain;
+                }
 
                 showEnrichmentPreviewModal(preview);
             } catch (e) {
