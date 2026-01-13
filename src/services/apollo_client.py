@@ -146,13 +146,15 @@ class ApolloClient:
         # Use the new api_search endpoint (mixed_people/search is deprecated)
         url = f"{self.base_url}/mixed_people/api_search"
 
+        # Include api_key in body as some Apollo endpoints require it
         payload = {
+            "api_key": self.api_key,
             "per_page": min(limit, 100),
             "page": 1,
         }
 
         if organization_domain:
-            # q_organization_domains for the api_search endpoint
+            # q_organization_domains for searching people at a company
             payload["q_organization_domains"] = organization_domain
         elif organization_name:
             payload["q_organization_name"] = organization_name
@@ -163,7 +165,7 @@ class ApolloClient:
             # person_titles should be an array of strings
             payload["person_titles"] = titles
 
-        logger.info(f"Apollo people search payload: {payload}")
+        logger.info(f"Apollo people search payload (api_key hidden): domain={organization_domain}, titles_count={len(titles) if titles else 0}")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:

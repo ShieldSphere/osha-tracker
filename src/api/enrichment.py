@@ -3,7 +3,7 @@ import logging
 from typing import Optional, List
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Body
 from pydantic import BaseModel
 
 from src.database.connection import get_db_session
@@ -73,6 +73,12 @@ class EnrichmentConfirmation(BaseModel):
     contacts_saved: int
     company_data: Optional[dict]
     error: Optional[str]
+
+
+class ConfirmEnrichmentRequest(BaseModel):
+    """Request body for confirming enrichment."""
+    organization: dict
+    contacts: Optional[List[dict]] = None
 
 
 # Endpoints
@@ -342,14 +348,16 @@ async def search_apollo(
 @router.post("/confirm/{inspection_id}", response_model=EnrichmentConfirmation)
 async def confirm_enrichment(
     inspection_id: int,
-    organization: dict,
-    contacts: Optional[List[dict]] = None,
+    request: ConfirmEnrichmentRequest,
 ):
     """
     Confirm and save enrichment data to database.
 
     Call this after reviewing Apollo search results to save the data.
     """
+    organization = request.organization
+    contacts = request.contacts
+
     with get_db_session() as db:
         inspection = db.query(Inspection).filter(Inspection.id == inspection_id).first()
         if not inspection:
