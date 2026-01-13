@@ -249,20 +249,12 @@ async def osha_dashboard():
                     <h2 class="text-xl font-semibold">Enriched Companies</h2>
                     <span id="enriched-count" class="text-sm text-gray-500"></span>
                 </div>
-                <div class="flex items-center gap-4">
-                    <select id="contacted-filter" onchange="loadEnrichedCompanies()" class="text-sm border border-gray-300 rounded px-3 py-1">
-                        <option value="">All Companies</option>
-                        <option value="not_contacted">Not Contacted</option>
-                        <option value="contacted">Contacted</option>
-                    </select>
-                    <button onclick="closeEnrichedCompaniesModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-                </div>
+                <button onclick="closeEnrichedCompaniesModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
             </div>
             <div class="overflow-y-auto flex-1">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50 sticky top-0">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contacted</th>
                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industry</th>
                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
@@ -2255,11 +2247,8 @@ async def osha_dashboard():
         }
 
         async function loadEnrichedCompanies() {
-            const filter = document.getElementById('contacted-filter').value;
-            const url = filter ? `${API_BASE}/companies/enriched?contacted_filter=${filter}` : `${API_BASE}/companies/enriched`;
-
             try {
-                const data = await fetch(url).then(r => r.json());
+                const data = await fetch(`${API_BASE}/companies/enriched`).then(r => r.json());
                 const list = document.getElementById('enriched-companies-list');
                 const noData = document.getElementById('no-enriched-companies');
                 const countEl = document.getElementById('enriched-count');
@@ -2274,13 +2263,7 @@ async def osha_dashboard():
 
                 noData.classList.add('hidden');
                 list.innerHTML = data.items.map(company => `
-                    <tr class="hover:bg-gray-50 ${company.contacted ? 'bg-green-50' : ''}">
-                        <td class="px-4 py-3">
-                            <input type="checkbox"
-                                ${company.contacted ? 'checked' : ''}
-                                onchange="toggleContacted(${company.id}, this.checked)"
-                                class="w-4 h-4 text-green-600 rounded border-gray-300 focus:ring-green-500 cursor-pointer">
-                        </td>
+                    <tr class="hover:bg-gray-50">
                         <td class="px-4 py-3">
                             <div class="font-medium text-gray-900">${escapeHtml(company.name)}</div>
                             ${company.website ? `<a href="${company.website}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800">${escapeHtml(company.website.replace('https://', '').replace('http://', '').split('/')[0])}</a>` : ''}
@@ -2301,6 +2284,11 @@ async def osha_dashboard():
                                 <button onclick="viewCompanyDetail(${company.id})" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
                                     View
                                 </button>
+                                <button onclick="addCompanyToCRM(${company.inspection_id})"
+                                    class="text-green-600 hover:text-green-800 text-sm font-medium"
+                                    title="Add to CRM">
+                                    + CRM
+                                </button>
                                 <button onclick="reEnrichWithApollo(${company.inspection_id}, ${company.id})"
                                     class="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
                                     title="Re-enrich with Apollo API">
@@ -2315,19 +2303,6 @@ async def osha_dashboard():
             }
         }
 
-        async function toggleContacted(companyId, contacted) {
-            try {
-                await fetch(`${API_BASE}/companies/${companyId}/contacted`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contacted })
-                });
-                // Reload the list to update styling
-                await loadEnrichedCompanies();
-            } catch (e) {
-                console.error('Error updating contacted status:', e);
-            }
-        }
 
         async function viewCompanyDetail(companyId) {
             try {
@@ -2377,16 +2352,14 @@ async def osha_dashboard():
                                 </svg>
                                 Apollo
                             </button>
-                            <label class="flex items-center gap-2 cursor-pointer">
-                                <input type="checkbox"
-                                    id="detail-contacted-checkbox"
-                                    ${company.contacted ? 'checked' : ''}
-                                    onchange="toggleContactedFromDetail(${company.id}, this.checked)"
-                                    class="w-5 h-5 text-green-600 rounded border-gray-300 focus:ring-green-500">
-                                <span class="text-sm font-medium ${company.contacted ? 'text-green-700' : 'text-gray-700'}">
-                                    ${company.contacted ? 'Contacted' : 'Not Contacted'}
-                                </span>
-                            </label>
+                            <button onclick="addCompanyToCRM(${company.inspection_id})"
+                                id="add-to-crm-btn-${company.id}"
+                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                                </svg>
+                                Add to CRM
+                            </button>
                             <button onclick="closeCompanyDetailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
                         </div>
                     </div>
@@ -2493,13 +2466,41 @@ async def osha_dashboard():
             `;
         }
 
-        async function toggleContactedFromDetail(companyId, contacted) {
-            await toggleContacted(companyId, contacted);
-            // Update the label text
-            const label = document.querySelector('#detail-contacted-checkbox').parentElement.querySelector('span');
-            if (label) {
-                label.textContent = contacted ? 'Contacted' : 'Not Contacted';
-                label.className = `text-sm font-medium ${contacted ? 'text-green-700' : 'text-gray-700'}`;
+        async function addCompanyToCRM(inspectionId) {
+            try {
+                // Create a prospect from this inspection
+                const response = await fetch('/api/crm/prospects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        inspection_id: inspectionId,
+                        status: 'new_lead',
+                        priority: 'medium'
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    alert('Company added to CRM as a new lead!');
+                    // Optionally redirect to CRM or update button state
+                    const btn = document.querySelector(`[onclick="addCompanyToCRM(${inspectionId})"]`);
+                    if (btn) {
+                        btn.textContent = 'Added to CRM';
+                        btn.disabled = true;
+                        btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                        btn.classList.add('bg-gray-400', 'cursor-not-allowed');
+                    }
+                } else {
+                    const error = await response.json();
+                    if (error.detail && error.detail.includes('already exists')) {
+                        alert('This company is already in the CRM.');
+                    } else {
+                        alert('Error adding to CRM: ' + (error.detail || 'Unknown error'));
+                    }
+                }
+            } catch (e) {
+                console.error('Error adding to CRM:', e);
+                alert('Error adding to CRM');
             }
         }
 
