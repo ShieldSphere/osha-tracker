@@ -143,7 +143,8 @@ class ApolloClient:
         Returns:
             List of matching people
         """
-        url = f"{self.base_url}/mixed_people/search"
+        # Use the new api_search endpoint (mixed_people/search is deprecated)
+        url = f"{self.base_url}/mixed_people/api_search"
 
         payload = {
             "per_page": min(limit, 100),
@@ -151,7 +152,7 @@ class ApolloClient:
         }
 
         if organization_domain:
-            # Use array format for domain filter
+            # q_organization_domains for the api_search endpoint
             payload["q_organization_domains"] = organization_domain
         elif organization_name:
             payload["q_organization_name"] = organization_name
