@@ -1,3 +1,4 @@
+import os
 import logging
 from contextlib import asynccontextmanager
 
@@ -40,13 +41,17 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize database: {e}", exc_info=True)
         raise
 
-    try:
-        start_scheduler()
-        logger.info("Scheduler started")
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {e}", exc_info=True)
-        # Continue without scheduler if it fails
-        logger.warning("Application running without background scheduler")
+    # Only start scheduler in non-serverless environments
+    if os.environ.get("VERCEL") != "1":
+        try:
+            start_scheduler()
+            logger.info("Scheduler started")
+        except Exception as e:
+            logger.error(f"Failed to start scheduler: {e}", exc_info=True)
+            # Continue without scheduler if it fails
+            logger.warning("Application running without background scheduler")
+    else:
+        logger.info("Running on Vercel - scheduler disabled (use external cron)")
 
     logger.info("Application startup complete")
 
@@ -55,11 +60,12 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down TSG Safety OSHA Tracker application...")
 
-    try:
-        stop_scheduler()
-        logger.info("Scheduler stopped")
-    except Exception as e:
-        logger.error(f"Error stopping scheduler: {e}", exc_info=True)
+    if os.environ.get("VERCEL") != "1":
+        try:
+            stop_scheduler()
+            logger.info("Scheduler stopped")
+        except Exception as e:
+            logger.error(f"Error stopping scheduler: {e}", exc_info=True)
 
     logger.info("Application shutdown complete")
 
