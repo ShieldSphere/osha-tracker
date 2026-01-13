@@ -115,8 +115,10 @@ app.include_router(epa_dashboard_router, tags=["epa-dashboard"])
 app.include_router(osha_dashboard_router, tags=["osha-dashboard"])
 app.include_router(main_dashboard_router, tags=["main-dashboard"])
 
-# Serve static files for dashboard
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Serve static files for dashboard (if directory exists)
+import os as _os
+if _os.path.isdir("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/api/health")

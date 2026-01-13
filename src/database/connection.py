@@ -1,3 +1,4 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
@@ -7,11 +8,18 @@ from src.config import settings
 from src.database.models import Base
 
 
+# Adjust connection string for pg8000 driver if needed
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgresql://") and "postgresql+pg8000://" not in db_url:
+    db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
+
+# Serverless-optimized settings
+is_serverless = os.environ.get("VERCEL") == "1"
 engine = create_engine(
-    settings.DATABASE_URL,
+    db_url,
     pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=1 if is_serverless else 5,
+    max_overflow=0 if is_serverless else 10,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
