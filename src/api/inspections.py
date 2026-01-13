@@ -1194,10 +1194,68 @@ async def get_company_by_id(company_id: int, db: Session = Depends(get_db)):
     )
 
 
+class CompanyUpdateRequest(BaseModel):
+    """Request to update company data."""
+    name: Optional[str] = None
+    domain: Optional[str] = None
+    website: Optional[str] = None
+    description: Optional[str] = None
+    industry: Optional[str] = None
+    sub_industry: Optional[str] = None
+    employee_count: Optional[int] = None
+    employee_range: Optional[str] = None
+    year_founded: Optional[int] = None
+    business_type: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postal_code: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+    twitter_url: Optional[str] = None
+    instagram_url: Optional[str] = None
+    youtube_url: Optional[str] = None
+
+
 class ContactedUpdateRequest(BaseModel):
     """Request to update contacted status."""
     contacted: bool
     notes: Optional[str] = None
+
+
+@router.patch("/companies/{company_id}")
+async def update_company(
+    company_id: int,
+    request: CompanyUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """Update company data fields."""
+    from datetime import datetime
+
+    company = db.execute(
+        select(Company).where(Company.id == company_id)
+    ).scalar_one_or_none()
+
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Update only the fields that were provided
+    update_data = request.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if hasattr(company, field):
+            setattr(company, field, value)
+
+    company.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "success": True,
+        "id": company.id,
+        "name": company.name,
+        "updated_fields": list(update_data.keys())
+    }
 
 
 @router.patch("/companies/{company_id}/contacted")

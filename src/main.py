@@ -16,6 +16,7 @@ from src.api.crm import router as crm_router
 from src.api.crm_dashboard import router as crm_dashboard_router
 from src.api.epa import router as epa_router
 from src.api.epa_dashboard import router as epa_dashboard_router
+from src.api.enrichment import router as enrichment_router
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -100,6 +101,7 @@ app.add_middleware(CSPMiddleware)
 app.include_router(inspections_router, prefix="/api/inspections", tags=["inspections"])
 app.include_router(crm_router, prefix="/api/crm", tags=["crm"])
 app.include_router(epa_router, prefix="/api/epa", tags=["epa"])
+app.include_router(enrichment_router, tags=["enrichment"])
 
 # Dashboard pages (order matters - main dashboard must be last to catch "/" route)
 app.include_router(crm_dashboard_router, tags=["crm-dashboard"])

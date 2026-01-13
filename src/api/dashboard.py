@@ -1469,6 +1469,11 @@ async def osha_dashboard():
             document.getElementById('modal').classList.add('hidden');
         }
 
+        // Enrichment state
+        let currentEnrichmentPreview = null;
+        let currentWebEnrichmentResult = null;
+        let currentApolloResult = null;
+
         async function enrichInspection(inspectionId) {
             const btn = document.getElementById(`enrich-btn-${inspectionId}`);
             if (btn) {
@@ -1478,52 +1483,378 @@ async def osha_dashboard():
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Enriching...
+                    Loading...
                 `;
             }
 
             try {
-                const result = await fetch(`${API_BASE}/${inspectionId}/enrich`, { method: 'POST' }).then(r => r.json());
+                // First, get the enrichment preview (no API credits used)
+                const preview = await fetch(`/api/enrichment/preview/${inspectionId}`).then(r => r.json());
+                currentEnrichmentPreview = preview;
+                currentWebEnrichmentResult = null;
+                currentApolloResult = null;
 
-                if (result.success) {
-                    // Show success and display company data
-                    if (btn) {
-                        btn.classList.remove('bg-blue-100', 'text-blue-700', 'hover:bg-blue-200');
-                        btn.classList.add('bg-green-100', 'text-green-700');
-                        btn.innerHTML = `
-                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                            </svg>
-                            Enriched
-                        `;
-                    }
-                    displayCompanyData(inspectionId, result);
-                } else {
-                    // Show error
-                    if (btn) {
-                        btn.classList.remove('bg-blue-100', 'text-blue-700', 'hover:bg-blue-200');
-                        btn.classList.add('bg-red-100', 'text-red-700');
-                        btn.disabled = false;
-                        btn.innerHTML = `
-                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                            Failed - Retry
-                        `;
-                        btn.onclick = () => {
-                            btn.classList.remove('bg-red-100', 'text-red-700');
-                            btn.classList.add('bg-blue-100', 'text-blue-700', 'hover:bg-blue-200');
-                            enrichInspection(inspectionId);
-                        };
-                    }
-                    console.error('Enrichment failed:', result.error);
+                // Show the enrichment preview modal
+                showEnrichmentPreviewModal(preview);
+
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = `
+                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Enrich
+                    `;
                 }
             } catch (e) {
-                console.error('Enrichment error:', e);
+                console.error('Error loading enrichment preview:', e);
                 if (btn) {
                     btn.disabled = false;
                     btn.innerHTML = 'Error - Retry';
                 }
+            }
+        }
+
+        function showEnrichmentPreviewModal(preview) {
+            const qualityColors = {
+                high: 'bg-green-100 text-green-800',
+                medium: 'bg-yellow-100 text-yellow-800',
+                low: 'bg-orange-100 text-orange-800',
+                unusable: 'bg-red-100 text-red-800'
+            };
+
+            const qualityColor = qualityColors[preview.quality.level] || 'bg-gray-100 text-gray-800';
+
+            const modal = document.createElement('div');
+            modal.id = 'enrichment-preview-modal';
+            modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]';
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+                    <div class="p-6 border-b bg-gradient-to-r from-indigo-50 to-purple-50">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h2 class="text-lg font-semibold text-gray-900">Enrichment Preview</h2>
+                                <p class="text-sm text-gray-500 mt-1">Review data quality before using API credits</p>
+                            </div>
+                            <button onclick="closeEnrichmentPreviewModal()" class="text-gray-400 hover:text-gray-600">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="p-6 space-y-6">
+                        <!-- Data Quality Section -->
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h3 class="font-medium text-gray-900">Data Quality Assessment</h3>
+                                <span class="px-3 py-1 rounded-full text-sm font-medium ${qualityColor}">
+                                    ${preview.quality.level.charAt(0).toUpperCase() + preview.quality.level.slice(1)} (${preview.quality.score}/100)
+                                </span>
+                            </div>
+                            ${preview.quality.issues.length > 0 ? `
+                                <ul class="text-sm text-gray-600 space-y-1">
+                                    ${preview.quality.issues.map(issue => `
+                                        <li class="flex items-center gap-2">
+                                            <svg class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                            </svg>
+                                            ${escapeHtml(issue)}
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            ` : `
+                                <p class="text-sm text-green-600">No issues detected</p>
+                            `}
+                        </div>
+
+                        <!-- Company Name Normalization -->
+                        <div>
+                            <h3 class="font-medium text-gray-900 mb-2">Company Name</h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p class="text-xs text-gray-500 uppercase mb-1">Original (OSHA)</p>
+                                    <p class="text-sm font-mono bg-gray-100 p-2 rounded">${escapeHtml(preview.original_name)}</p>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-gray-500 uppercase mb-1">Normalized (for search)</p>
+                                    <p class="text-sm font-mono bg-blue-50 p-2 rounded">${escapeHtml(preview.normalized_name)}</p>
+                                </div>
+                            </div>
+                            ${preview.normalization_changes.length > 0 ? `
+                                <p class="text-xs text-gray-500 mt-2">Changes: ${preview.normalization_changes.join(', ')}</p>
+                            ` : ''}
+                        </div>
+
+                        <!-- Location -->
+                        <div>
+                            <h3 class="font-medium text-gray-900 mb-2">Location</h3>
+                            <p class="text-sm text-gray-600">
+                                ${[preview.location.address, preview.location.city, preview.location.state].filter(Boolean).join(', ') || 'No location data'}
+                            </p>
+                        </div>
+
+                        <!-- Search Variants -->
+                        <div>
+                            <h3 class="font-medium text-gray-900 mb-2">Search Variants</h3>
+                            <div class="flex flex-wrap gap-2">
+                                ${preview.search_variants.map(v => `
+                                    <span class="px-2 py-1 bg-gray-100 rounded text-sm">${escapeHtml(v)}</span>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Recommendation -->
+                        <div class="bg-indigo-50 rounded-lg p-4">
+                            <p class="text-sm font-medium text-indigo-900">${escapeHtml(preview.recommendation_reason)}</p>
+                        </div>
+
+                        <!-- Web Enrichment Result (if run) -->
+                        <div id="web-enrichment-result" class="hidden"></div>
+
+                        <!-- Apollo Result (if run) -->
+                        <div id="apollo-result" class="hidden"></div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="p-6 border-t bg-gray-50">
+                        <div class="flex justify-between items-center">
+                            <div class="text-sm text-gray-500">
+                                <span id="credits-estimate">Estimated credits: ${preview.estimated_credits}</span>
+                            </div>
+                            <div class="flex gap-3">
+                                <button onclick="closeEnrichmentPreviewModal()"
+                                    class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                                    Cancel
+                                </button>
+                                <button onclick="runFullEnrichment(${preview.inspection_id})" id="btn-full-enrich"
+                                    class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 ${preview.recommendation === 'do_not_enrich' ? 'opacity-50' : ''}"
+                                    ${preview.recommendation === 'do_not_enrich' ? 'disabled title="Data quality too low"' : ''}>
+                                    <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                    </svg>
+                                    Search with Apollo
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+        }
+
+        function closeEnrichmentPreviewModal() {
+            const modal = document.getElementById('enrichment-preview-modal');
+            if (modal) modal.remove();
+            currentEnrichmentPreview = null;
+            currentWebEnrichmentResult = null;
+            currentApolloResult = null;
+        }
+
+        async function runFullEnrichment(inspectionId) {
+            const btn = document.getElementById('btn-full-enrich');
+            const webResultContainer = document.getElementById('web-enrichment-result');
+            const apolloResultContainer = document.getElementById('apollo-result');
+
+            btn.disabled = true;
+
+            // Step 1: Web search to find domain
+            btn.innerHTML = `
+                <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Step 1: Finding website...
+            `;
+
+            try {
+                // Run web enrichment first
+                const webResult = await fetch(`/api/enrichment/web-enrich/${inspectionId}`, { method: 'POST' }).then(r => r.json());
+                currentWebEnrichmentResult = webResult;
+
+                // Show web search results
+                webResultContainer.classList.remove('hidden');
+                if (webResult.website_url) {
+                    webResultContainer.innerHTML = `
+                        <div class="bg-green-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <h3 class="font-medium text-green-900">Website Found</h3>
+                            </div>
+                            <p class="text-sm"><a href="${webResult.website_url}" target="_blank" class="text-blue-600 hover:underline">${escapeHtml(webResult.website_url)}</a></p>
+                        </div>
+                    `;
+                } else {
+                    webResultContainer.innerHTML = `
+                        <div class="bg-yellow-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                </svg>
+                                <h3 class="font-medium text-yellow-900">No Website Found</h3>
+                            </div>
+                            <p class="text-sm text-yellow-700">Will search Apollo by company name (less accurate)</p>
+                        </div>
+                    `;
+                }
+
+                // Step 2: Apollo search using domain if found
+                btn.innerHTML = `
+                    <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Step 2: Searching Apollo...
+                `;
+
+                let apolloUrl = `/api/enrichment/apollo-search/${inspectionId}`;
+                if (webResult.website_url) {
+                    try {
+                        const domain = new URL(webResult.website_url).hostname.replace('www.', '');
+                        apolloUrl += `?domain=${encodeURIComponent(domain)}`;
+                    } catch (e) {
+                        console.warn('Could not parse website URL for domain:', e);
+                    }
+                }
+
+                const apolloResult = await fetch(apolloUrl, { method: 'POST' }).then(r => r.json());
+                currentApolloResult = apolloResult;
+
+                // Show Apollo results
+                apolloResultContainer.classList.remove('hidden');
+
+                if (apolloResult.success && apolloResult.organization) {
+                    const org = apolloResult.organization;
+                    const people = apolloResult.people;
+
+                    apolloResultContainer.innerHTML = `
+                        <div class="bg-indigo-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-3">
+                                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <h3 class="font-medium text-indigo-900">Apollo Match Found</h3>
+                                <span class="text-xs text-indigo-600">(${apolloResult.credits_used} credits used)</span>
+                            </div>
+                            <div class="text-sm space-y-2 mb-4">
+                                <p><strong>Company:</strong> ${escapeHtml(org.name || 'Unknown')}</p>
+                                ${org.domain ? `<p><strong>Domain:</strong> ${escapeHtml(org.domain)}</p>` : ''}
+                                ${org.industry ? `<p><strong>Industry:</strong> ${escapeHtml(org.industry)}</p>` : ''}
+                                ${org.employee_range ? `<p><strong>Employees:</strong> ${escapeHtml(org.employee_range)}</p>` : ''}
+                                ${org.phone ? `<p><strong>Phone:</strong> ${escapeHtml(org.phone)}</p>` : ''}
+                                ${org.city && org.state ? `<p><strong>Location:</strong> ${escapeHtml(org.city)}, ${escapeHtml(org.state)}</p>` : ''}
+                            </div>
+                            ${people?.safety_contacts?.length || people?.executive_contacts?.length ? `
+                                <div class="border-t border-indigo-200 pt-3 mb-4">
+                                    <p class="font-medium text-indigo-900 mb-2">Contacts Found (${(people.safety_contacts?.length || 0) + (people.executive_contacts?.length || 0)}):</p>
+                                    <ul class="text-sm space-y-1">
+                                        ${(people.safety_contacts || []).slice(0, 3).map(c => `
+                                            <li class="flex items-center gap-2">
+                                                <span class="px-1.5 py-0.5 bg-green-100 text-green-800 text-xs rounded">Safety</span>
+                                                ${escapeHtml(c.full_name || '')} - ${escapeHtml(c.title || '')}
+                                            </li>
+                                        `).join('')}
+                                        ${(people.executive_contacts || []).slice(0, 3).map(c => `
+                                            <li class="flex items-center gap-2">
+                                                <span class="px-1.5 py-0.5 bg-purple-100 text-purple-800 text-xs rounded">Exec</span>
+                                                ${escapeHtml(c.full_name || '')} - ${escapeHtml(c.title || '')}
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+                            <button onclick="confirmAndSaveEnrichment(${inspectionId})"
+                                class="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
+                                Confirm & Save to Database
+                            </button>
+                        </div>
+                    `;
+
+                    btn.innerHTML = `Search Complete`;
+                    btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+                    btn.classList.add('bg-green-600');
+                } else {
+                    apolloResultContainer.innerHTML = `
+                        <div class="bg-red-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                <h3 class="font-medium text-red-900">No Apollo Match</h3>
+                            </div>
+                            <p class="text-sm text-red-700">${apolloResult.error || 'No organization found in Apollo'}</p>
+                            <p class="text-xs text-red-500 mt-1">Credits used: ${apolloResult.credits_used}</p>
+                        </div>
+                    `;
+                    btn.innerHTML = 'No Results - Try Again';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                console.error('Enrichment error:', e);
+                btn.innerHTML = 'Error - Retry';
+                btn.disabled = false;
+            }
+        }
+
+        async function confirmAndSaveEnrichment(inspectionId) {
+            if (!currentApolloResult?.organization) {
+                alert('No Apollo data to save');
+                return;
+            }
+
+            try {
+                // Combine all contacts
+                const contacts = [
+                    ...(currentApolloResult.people?.safety_contacts || []),
+                    ...(currentApolloResult.people?.executive_contacts || [])
+                ];
+
+                const response = await fetch(`/api/enrichment/confirm/${inspectionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        organization: currentApolloResult.organization,
+                        contacts: contacts
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.company_saved) {
+                    const isReEnrich = currentEnrichmentPreview?.isReEnrich;
+                    alert(`${isReEnrich ? 'Updated' : 'Saved'} successfully! Company: ${result.company_data?.name}, Contacts: ${result.contacts_saved}`);
+                    closeEnrichmentPreviewModal();
+
+                    // Update the inspection detail modal to show enriched data
+                    const enrichBtn = document.getElementById(`enrich-btn-${inspectionId}`);
+                    if (enrichBtn) {
+                        enrichBtn.classList.remove('bg-blue-100', 'text-blue-700');
+                        enrichBtn.classList.add('bg-green-100', 'text-green-700');
+                        enrichBtn.innerHTML = 'Enriched';
+                        enrichBtn.disabled = true;
+                    }
+
+                    // Display the company data in the modal (if inspection modal is open)
+                    displayCompanyData(inspectionId, {
+                        success: true,
+                        data: currentApolloResult.organization,
+                        confidence: 'high'
+                    });
+
+                    // Reload enriched companies list if it was a re-enrich
+                    if (isReEnrich) {
+                        loadEnrichedCompanies();
+                    }
+                } else {
+                    alert(`Error saving: ${result.error}`);
+                }
+            } catch (e) {
+                console.error('Error saving enrichment:', e);
+                alert('Error saving enrichment data');
             }
         }
 
@@ -1913,9 +2244,16 @@ async def osha_dashboard():
                             ${company.created_at ? new Date(company.created_at).toLocaleDateString() : '-'}
                         </td>
                         <td class="px-4 py-3">
-                            <button onclick="viewCompanyDetail(${company.id})" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                                View Details
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button onclick="viewCompanyDetail(${company.id})" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                                    View
+                                </button>
+                                <button onclick="reEnrichWithApollo(${company.inspection_id}, ${company.id})"
+                                    class="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                                    title="Re-enrich with Apollo API">
+                                    Apollo
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `).join('');
@@ -1962,13 +2300,30 @@ async def osha_dashboard():
 
                 const contacts = data.contacts || [];
 
+                // Store current company data for editing
+                window.currentEditCompany = company;
+
                 content.innerHTML = `
                     <div class="p-6 border-b flex justify-between items-center bg-green-50">
                         <div>
-                            <h2 class="text-xl font-semibold">${escapeHtml(company.name)}</h2>
+                            <h2 class="text-xl font-semibold" id="company-name-display">${escapeHtml(company.name)}</h2>
                             <p class="text-sm text-gray-500">${[company.city, company.state].filter(Boolean).join(', ')}</p>
                         </div>
                         <div class="flex items-center gap-4">
+                            <button onclick="toggleEditMode(${company.id})" id="edit-company-btn"
+                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-yellow-500 text-white hover:bg-yellow-600 transition-colors">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                </svg>
+                                Edit
+                            </button>
+                            <button onclick="reEnrichWithApollo(${company.inspection_id}, ${company.id})"
+                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                                Apollo
+                            </button>
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox"
                                     id="detail-contacted-checkbox"
@@ -1984,6 +2339,9 @@ async def osha_dashboard():
                     </div>
                     <div id="company-detail-body" class="p-6">
                         <!-- Will be filled by displayCompanyData-style content -->
+                    </div>
+                    <div id="company-edit-form" class="p-6 hidden">
+                        <!-- Edit form will be shown here -->
                     </div>
                 `;
 
@@ -2094,6 +2452,239 @@ async def osha_dashboard():
 
         function closeCompanyDetailModal() {
             document.getElementById('company-detail-modal').classList.add('hidden');
+            window.currentEditCompany = null;
+        }
+
+        function toggleEditMode(companyId) {
+            const detailBody = document.getElementById('company-detail-body');
+            const editForm = document.getElementById('company-edit-form');
+            const editBtn = document.getElementById('edit-company-btn');
+            const company = window.currentEditCompany;
+
+            if (!company) return;
+
+            if (editForm.classList.contains('hidden')) {
+                // Switch to edit mode
+                detailBody.classList.add('hidden');
+                editForm.classList.remove('hidden');
+                editBtn.innerHTML = `
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                    Cancel
+                `;
+                editBtn.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+                editBtn.classList.add('bg-gray-500', 'hover:bg-gray-600');
+
+                // Build edit form
+                editForm.innerHTML = `
+                    <form onsubmit="saveCompanyEdits(event, ${companyId})" class="space-y-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Basic Info -->
+                            <div class="space-y-4">
+                                <h3 class="font-semibold text-gray-900 border-b pb-2">Basic Information</h3>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+                                    <input type="text" name="name" value="${escapeHtml(company.name || '')}" required
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+                                    <input type="url" name="website" value="${escapeHtml(company.website || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="https://example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Domain</label>
+                                    <input type="text" name="domain" value="${escapeHtml(company.domain || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        placeholder="example.com">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+                                    <input type="text" name="industry" value="${escapeHtml(company.industry || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Sub-Industry</label>
+                                    <input type="text" name="sub_industry" value="${escapeHtml(company.sub_industry || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Employee Count</label>
+                                        <input type="number" name="employee_count" value="${company.employee_count || ''}"
+                                            class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Employee Range</label>
+                                        <input type="text" name="employee_range" value="${escapeHtml(company.employee_range || '')}"
+                                            class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                            placeholder="e.g., 11-50">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Year Founded</label>
+                                    <input type="number" name="year_founded" value="${company.year_founded || ''}" min="1800" max="2030"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                            </div>
+
+                            <!-- Contact & Address -->
+                            <div class="space-y-4">
+                                <h3 class="font-semibold text-gray-900 border-b pb-2">Contact & Address</h3>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                                    <input type="tel" name="phone" value="${escapeHtml(company.phone || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                    <input type="email" name="email" value="${escapeHtml(company.email || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Street Address</label>
+                                    <input type="text" name="address" value="${escapeHtml(company.address || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div class="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">City</label>
+                                        <input type="text" name="city" value="${escapeHtml(company.city || '')}"
+                                            class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">State</label>
+                                        <input type="text" name="state" value="${escapeHtml(company.state || '')}" maxlength="2"
+                                            class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">ZIP</label>
+                                        <input type="text" name="postal_code" value="${escapeHtml(company.postal_code || '')}"
+                                            class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                    </div>
+                                </div>
+
+                                <h3 class="font-semibold text-gray-900 border-b pb-2 mt-6">Social Media</h3>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
+                                    <input type="url" name="linkedin_url" value="${escapeHtml(company.linkedin_url || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Facebook URL</label>
+                                    <input type="url" name="facebook_url" value="${escapeHtml(company.facebook_url || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Twitter/X URL</label>
+                                    <input type="url" name="twitter_url" value="${escapeHtml(company.twitter_url || '')}"
+                                        class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Description -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                            <textarea name="description" rows="3"
+                                class="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">${escapeHtml(company.description || '')}</textarea>
+                        </div>
+
+                        <!-- Submit -->
+                        <div class="flex justify-end gap-3 pt-4 border-t">
+                            <button type="button" onclick="toggleEditMode(${companyId})"
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                                Cancel
+                            </button>
+                            <button type="submit"
+                                class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">
+                                Save Changes
+                            </button>
+                        </div>
+                    </form>
+                `;
+            } else {
+                // Switch back to view mode
+                detailBody.classList.remove('hidden');
+                editForm.classList.add('hidden');
+                editBtn.innerHTML = `
+                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                    Edit
+                `;
+                editBtn.classList.remove('bg-gray-500', 'hover:bg-gray-600');
+                editBtn.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+            }
+        }
+
+        async function saveCompanyEdits(event, companyId) {
+            event.preventDefault();
+
+            const form = event.target;
+            const formData = new FormData(form);
+            const data = {};
+
+            // Collect all form values
+            for (const [key, value] of formData.entries()) {
+                if (value !== '' && value !== null) {
+                    // Convert numeric fields
+                    if (key === 'employee_count' || key === 'year_founded') {
+                        data[key] = parseInt(value) || null;
+                    } else {
+                        data[key] = value;
+                    }
+                }
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/companies/${companyId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('Company updated successfully!');
+
+                    // Reload the company detail to show updated data
+                    closeCompanyDetailModal();
+                    await loadEnrichedCompanies();
+                    viewCompanyDetail(companyId);
+                } else {
+                    alert('Error updating company: ' + (result.detail || 'Unknown error'));
+                }
+            } catch (e) {
+                console.error('Error saving company edits:', e);
+                alert('Error saving changes');
+            }
+        }
+
+        async function reEnrichWithApollo(inspectionId, companyId) {
+            // Close any open modals first
+            closeCompanyDetailModal();
+            closeEnrichedCompaniesModal();
+
+            // Open the enrichment preview modal (same flow as new enrichment)
+            try {
+                const preview = await fetch(`/api/enrichment/preview/${inspectionId}`).then(r => r.json());
+                currentEnrichmentPreview = preview;
+                currentWebEnrichmentResult = null;
+                currentApolloResult = null;
+
+                // Mark that this is a re-enrichment
+                preview.isReEnrich = true;
+                preview.existingCompanyId = companyId;
+
+                showEnrichmentPreviewModal(preview);
+            } catch (e) {
+                console.error('Error loading enrichment preview:', e);
+                alert('Error loading enrichment preview');
+            }
         }
 
         // Charts modal functions
