@@ -52,6 +52,20 @@ class CallbackStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+# EPA Enums
+class EPACaseStatus(str, enum.Enum):
+    OPEN = "open"
+    SETTLEMENT = "settlement"
+    CLOSED = "closed"
+    UNKNOWN = "unknown"
+
+
+class EPACaseCategory(str, enum.Enum):
+    AFR = "AFR"  # Administrative - Formal
+    AIF = "AIF"  # Administrative - Informal
+    JDC = "JDC"  # Judicial
+
+
 class Inspection(Base):
     __tablename__ = "inspections"
 
@@ -246,6 +260,9 @@ class Company(Base):
     description = Column(Text)
     services = Column(Text)  # JSON array of services
 
+    # Data quality
+    confidence = Column(String(20))  # high, medium, low - enrichment verification confidence
+
     # Address (from Apollo, may differ from inspection site)
     address = Column(String(255))
     city = Column(String(100))
@@ -414,3 +431,80 @@ class Callback(Base):
 
     # Relationships
     prospect = relationship("Prospect", back_populates="callbacks")
+
+
+# =============================================================================
+# EPA ENFORCEMENT MODELS
+# =============================================================================
+
+class EPACase(Base):
+    """
+    EPA Enforcement Case - from ECHO database.
+    Tracks environmental enforcement actions (Clean Air Act, Clean Water Act, RCRA, etc.)
+    """
+    __tablename__ = "epa_cases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_number = Column(String(50), unique=True, nullable=False, index=True)
+    activity_id = Column(String(50), index=True)  # EPA internal activity ID
+
+    # Case identification
+    case_name = Column(String(500))  # Usually defendant/company name
+    case_category = Column(String(10))  # AFR, AIF, JDC
+    case_category_desc = Column(String(100))
+    case_status = Column(String(50))
+    case_status_desc = Column(String(100))
+    civil_criminal = Column(String(10))  # CI=Civil, CR=Criminal
+
+    # Case lead
+    case_lead = Column(String(10))  # E=EPA, S=State
+    lead_agency = Column(String(100))
+    region = Column(String(10))  # EPA Region 01-10
+
+    # Dates
+    date_filed = Column(Date)  # When complaint/order issued
+    settlement_date = Column(Date)
+    date_lodged = Column(Date)  # When consent decree lodged
+    date_closed = Column(Date)
+
+    # Financial data
+    fed_penalty = Column(Float, default=0)  # Federal penalty assessed
+    state_local_penalty = Column(Float, default=0)
+    cost_recovery = Column(Float, default=0)
+    compliance_action_cost = Column(Float, default=0)
+    sep_cost = Column(Float, default=0)  # Supplemental Environmental Projects
+
+    # Facility/Company info
+    primary_naics = Column(String(10))
+    primary_sic = Column(String(10))
+    facility_name = Column(String(255))
+    facility_city = Column(String(100))
+    facility_state = Column(String(2), index=True)
+    facility_zip = Column(String(10))
+
+    # Environmental laws violated (boolean flags)
+    caa_flag = Column(Boolean, default=False)  # Clean Air Act
+    cwa_flag = Column(Boolean, default=False)  # Clean Water Act
+    rcra_flag = Column(Boolean, default=False)  # Resource Conservation and Recovery Act
+    sdwa_flag = Column(Boolean, default=False)  # Safe Drinking Water Act
+    cercla_flag = Column(Boolean, default=False)  # Superfund
+    epcra_flag = Column(Boolean, default=False)  # Emergency Planning and Community Right-to-Know
+    tsca_flag = Column(Boolean, default=False)  # Toxic Substances Control Act
+    fifra_flag = Column(Boolean, default=False)  # Federal Insecticide, Fungicide, and Rodenticide Act
+
+    # Primary law
+    primary_law = Column(String(50))
+    primary_section = Column(String(100))
+
+    # Additional flags
+    federal_facility = Column(Boolean, default=False)
+    tribal_land = Column(Boolean, default=False)
+    multimedia = Column(Boolean, default=False)  # Multiple environmental laws
+
+    # Settlement info
+    settlement_count = Column(Integer, default=0)
+    enforcement_outcome = Column(Text)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple
 
 from sqlalchemy.orm import Session
@@ -57,9 +57,12 @@ class SyncService:
         }
 
         try:
+            # Calculate since_date from days_back
+            since_date = (datetime.now() - timedelta(days=days_back)).date()
+
             # Fetch inspections from OSHA API
             raw_inspections = await self.osha_client.fetch_all_new_inspections(
-                days_back=days_back
+                since_date=since_date
             )
             stats["fetched"] = len(raw_inspections)
 

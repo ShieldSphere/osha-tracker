@@ -10,8 +10,12 @@ from starlette.requests import Request
 from src.config import settings
 from src.database.connection import init_db
 from src.api.inspections import router as inspections_router
-from src.api.dashboard import router as dashboard_router
+from src.api.dashboard import router as osha_dashboard_router
+from src.api.main_dashboard import router as main_dashboard_router
 from src.api.crm import router as crm_router
+from src.api.crm_dashboard import router as crm_dashboard_router
+from src.api.epa import router as epa_router
+from src.api.epa_dashboard import router as epa_dashboard_router
 from src.services.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging
@@ -60,8 +64,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="TSG Safety OSHA Tracker",
-    description="Monitor OSHA inspections and enrich with contact data",
+    title="TSG Safety Compliance Tracker",
+    description="Monitor OSHA inspections, EPA enforcement cases, and manage sales pipeline",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -95,7 +99,13 @@ app.add_middleware(CSPMiddleware)
 # API routes
 app.include_router(inspections_router, prefix="/api/inspections", tags=["inspections"])
 app.include_router(crm_router, prefix="/api/crm", tags=["crm"])
-app.include_router(dashboard_router, tags=["dashboard"])
+app.include_router(epa_router, prefix="/api/epa", tags=["epa"])
+
+# Dashboard pages (order matters - main dashboard must be last to catch "/" route)
+app.include_router(crm_dashboard_router, tags=["crm-dashboard"])
+app.include_router(epa_dashboard_router, tags=["epa-dashboard"])
+app.include_router(osha_dashboard_router, tags=["osha-dashboard"])
+app.include_router(main_dashboard_router, tags=["main-dashboard"])
 
 # Serve static files for dashboard
 app.mount("/static", StaticFiles(directory="static"), name="static")

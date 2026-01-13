@@ -4,16 +4,16 @@ from fastapi.responses import HTMLResponse
 router = APIRouter()
 
 
-@router.get("/", response_class=HTMLResponse)
-async def dashboard():
-    """Serve the main dashboard page."""
+@router.get("/osha", response_class=HTMLResponse)
+async def osha_dashboard():
+    """Serve the OSHA inspection tracker page."""
     return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TSG Safety OSHA Tracker</title>
+    <title>OSHA Tracker - TSG Safety</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -45,29 +45,33 @@ async def dashboard():
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
-    <nav class="bg-blue-600 text-white p-4 shadow-lg">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-2xl font-bold">TSG Safety OSHA Tracker</h1>
-            <div class="flex items-center gap-4">
-                <span id="sync-status" class="text-sm"></span>
-                <button onclick="openCRMModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                    </svg>
-                    CRM
-                </button>
-                <button onclick="openEnrichedCompaniesModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                    </svg>
-                    Enriched Companies
-                </button>
-                <button onclick="openChartsModal()" class="bg-blue-500 hover:bg-blue-700 px-4 py-2 rounded">
-                    Charts
-                </button>
-                <button onclick="triggerSync()" class="bg-blue-500 hover:bg-blue-700 px-4 py-2 rounded">
-                    Sync Now
-                </button>
+    <nav class="bg-gray-900 text-white shadow-lg">
+        <div class="container mx-auto px-4">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-8">
+                    <h1 class="text-xl font-bold">TSG Safety</h1>
+                    <div class="flex space-x-1">
+                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
+                        <a href="/osha" class="px-3 py-2 rounded-md text-sm font-medium bg-blue-600 text-white">OSHA</a>
+                        <a href="/epa" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">EPA</a>
+                        <a href="/crm" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">CRM</a>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span id="sync-status" class="text-sm text-gray-400"></span>
+                    <button onclick="openEnrichedCompaniesModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex items-center gap-2 text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                        </svg>
+                        Enriched Companies
+                    </button>
+                    <button onclick="openChartsModal()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
+                        Charts
+                    </button>
+                    <button onclick="triggerSync()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                        Sync Now
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
@@ -96,17 +100,17 @@ async def dashboard():
                         <p id="new-violations-penalties" class="text-[10px] text-gray-600"></p>
                     </div>
                     <!-- CRM Pipeline Widget -->
-                    <div class="bg-gradient-to-br from-purple-50 to-indigo-50 p-2.5 rounded-lg shadow border border-purple-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openCRMModal()">
+                    <a href="/crm" class="block bg-gradient-to-br from-purple-50 to-indigo-50 p-2.5 rounded-lg shadow border border-purple-200 cursor-pointer hover:shadow-md transition-shadow">
                         <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">👥 CRM Pipeline</h3>
                         <p id="crm-total-prospects" class="text-lg font-bold text-purple-600">-</p>
                         <p id="crm-pipeline-value" class="text-[10px] text-gray-600">Loading...</p>
-                    </div>
+                    </a>
                     <!-- Upcoming Callbacks Widget -->
-                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 p-2.5 rounded-lg shadow border border-green-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openCRMModal()">
+                    <a href="/crm" class="block bg-gradient-to-br from-green-50 to-emerald-50 p-2.5 rounded-lg shadow border border-green-200 cursor-pointer hover:shadow-md transition-shadow">
                         <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">📅 Callbacks (7d)</h3>
                         <p id="crm-upcoming-callbacks" class="text-lg font-bold text-green-600">-</p>
                         <p id="crm-overdue-callbacks" class="text-[10px] text-red-600"></p>
-                    </div>
+                    </a>
                     <div class="bg-white p-2.5 rounded-lg shadow">
                         <h3 class="text-gray-500 text-[10px] uppercase tracking-wider mb-0.5">Total Inspections</h3>
                         <p id="stat-total" class="text-lg font-bold text-blue-600">-</p>
@@ -301,11 +305,15 @@ async def dashboard():
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <h3 class="text-lg font-semibold mb-4">Inspections by State</h3>
-                        <canvas id="chart-states"></canvas>
+                        <div style="height: 300px; position: relative;">
+                            <canvas id="chart-states"></canvas>
+                        </div>
                     </div>
                     <div>
                         <h3 class="text-lg font-semibold mb-4">Inspections by Type</h3>
-                        <canvas id="chart-types"></canvas>
+                        <div style="height: 300px; position: relative;">
+                            <canvas id="chart-types"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -367,107 +375,6 @@ async def dashboard():
                         <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
                     </tbody>
                 </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- CRM Modal -->
-    <div id="crm-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] flex flex-col">
-            <div class="p-6 border-b flex justify-between items-center bg-gradient-to-r from-purple-50 to-indigo-50">
-                <div>
-                    <h2 class="text-xl font-semibold text-gray-800">👥 CRM - Sales Pipeline</h2>
-                    <p id="crm-modal-subtitle" class="text-sm text-gray-600 mt-1"></p>
-                </div>
-                <button onclick="closeCRMModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            <!-- CRM Tabs -->
-            <div class="border-b px-6 flex gap-4">
-                <button id="crm-tab-prospects" onclick="switchCRMTab('prospects')" class="py-3 px-4 border-b-2 border-purple-600 text-purple-600 font-medium">Prospects</button>
-                <button id="crm-tab-callbacks" onclick="switchCRMTab('callbacks')" class="py-3 px-4 border-b-2 border-transparent text-gray-500 hover:text-gray-700">Callbacks</button>
-            </div>
-            <!-- CRM Stats Bar -->
-            <div class="px-6 py-3 bg-gray-50 border-b flex gap-6 text-sm">
-                <div><span class="text-gray-500">New:</span> <span id="crm-stat-new" class="font-semibold text-blue-600">0</span></div>
-                <div><span class="text-gray-500">Contacted:</span> <span id="crm-stat-contacted" class="font-semibold text-yellow-600">0</span></div>
-                <div><span class="text-gray-500">Qualified:</span> <span id="crm-stat-qualified" class="font-semibold text-green-600">0</span></div>
-                <div><span class="text-gray-500">Won:</span> <span id="crm-stat-won" class="font-semibold text-purple-600">0</span></div>
-                <div><span class="text-gray-500">Lost:</span> <span id="crm-stat-lost" class="font-semibold text-red-600">0</span></div>
-                <div class="ml-auto"><span class="text-gray-500">Pipeline Value:</span> <span id="crm-stat-value" class="font-semibold text-green-600">$0</span></div>
-            </div>
-            <!-- CRM Filter Bar -->
-            <div class="px-6 py-3 border-b flex gap-4 items-center">
-                <select id="crm-filter-status" onchange="loadProspects()" class="border rounded px-3 py-1.5 text-sm">
-                    <option value="">All Statuses</option>
-                    <option value="new_lead">New Lead</option>
-                    <option value="contacted">Contacted</option>
-                    <option value="qualified">Qualified</option>
-                    <option value="won">Won</option>
-                    <option value="lost">Lost</option>
-                </select>
-                <select id="crm-filter-priority" onchange="loadProspects()" class="border rounded px-3 py-1.5 text-sm">
-                    <option value="">All Priorities</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                </select>
-                <input type="text" id="crm-search" placeholder="Search company..." class="border rounded px-3 py-1.5 text-sm w-48" onkeyup="debounceCRMSearch()">
-            </div>
-            <!-- CRM Content -->
-            <div class="flex-1 overflow-auto p-6">
-                <!-- Prospects Tab -->
-                <div id="crm-prospects-content">
-                    <table class="w-full">
-                        <thead class="bg-gray-50 sticky top-0">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Priority</th>
-                                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Est. Value</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Next Action</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="crm-prospects-list">
-                            <tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <!-- Callbacks Tab -->
-                <div id="crm-callbacks-content" class="hidden">
-                    <table class="w-full">
-                        <thead class="bg-gray-50 sticky top-0">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date/Time</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="crm-callbacks-list">
-                            <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Prospect Detail Modal -->
-    <div id="prospect-detail-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-[60]">
-        <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col">
-            <div class="p-6 border-b flex justify-between items-center">
-                <div>
-                    <h2 id="prospect-detail-title" class="text-xl font-semibold text-gray-800">Prospect Details</h2>
-                    <p id="prospect-detail-subtitle" class="text-sm text-gray-600 mt-1"></p>
-                </div>
-                <button onclick="closeProspectDetailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            <div class="flex-1 overflow-auto p-6" id="prospect-detail-content">
-                <!-- Content loaded dynamically -->
             </div>
         </div>
     </div>
@@ -1534,20 +1441,20 @@ async def dashboard():
                 if (response.ok) {
                     const data = await response.json();
                     if (data.exists) {
-                        // Already a prospect - show "View in CRM" button
+                        // Already a prospect - show "View in CRM" link
                         container.innerHTML = `
                             <div class="flex items-center gap-2">
                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(data.status)}">
                                     ${formatStatus(data.status)}
                                 </span>
-                                <button onclick="openProspectDetail(${data.id})"
+                                <a href="/crm"
                                     class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
                                     <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                                     </svg>
                                     View in CRM
-                                </button>
+                                </a>
                             </div>
                         `;
                     }
@@ -1626,6 +1533,7 @@ async def dashboard():
 
             const data = result.data;
             const websiteUrl = result.website_url;
+            const confidence = result.confidence || data.confidence || 'unknown';
 
             // Handle both API response formats (enrichment result vs stored company)
             const companyName = data.official_name || data.name;
@@ -1655,14 +1563,27 @@ async def dashboard():
             // Get contacts (from API response or key_personnel)
             const contacts = data.contacts || data.key_personnel || [];
 
+            // Confidence badge colors and labels
+            const confidenceBadge = {
+                high: { bg: 'bg-green-100', text: 'text-green-800', label: 'High Confidence' },
+                medium: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Medium Confidence' },
+                low: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Low Confidence' },
+                unknown: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Unverified' }
+            }[confidence] || { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Unknown' };
+
             section.innerHTML = `
                 <div class="border-t border-gray-200">
                     <!-- Header -->
                     <div class="px-6 py-4 bg-green-50 border-b border-gray-200">
                         <div class="flex items-center justify-between">
-                            <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">
-                                Company Information (Enriched)
-                            </h3>
+                            <div class="flex items-center gap-3">
+                                <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                    Company Information (Enriched)
+                                </h3>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${confidenceBadge.bg} ${confidenceBadge.text}" title="Data verification confidence level">
+                                    ${confidenceBadge.label}
+                                </span>
+                            </div>
                             <div class="flex items-center gap-3">
                                 ${social.linkedin_url ? `
                                     <a href="${social.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn">
@@ -1888,7 +1809,11 @@ async def dashboard():
             try {
                 const company = await fetch(`${API_BASE}/${inspectionId}/company`).then(r => r.json());
                 if (company) {
-                    displayCompanyData(inspectionId, { data: company, website_url: company.website });
+                    displayCompanyData(inspectionId, {
+                        data: company,
+                        website_url: company.website,
+                        confidence: company.confidence
+                    });
                 }
             } catch (e) {
                 console.error('Error loading company data:', e);
@@ -2242,8 +2167,6 @@ async def dashboard():
             if (e.key === 'Escape') {
                 closeModal();
                 closeChartsModal();
-                closeCRMModal();
-                closeProspectDetailModal();
             }
         });
         document.getElementById('modal').addEventListener('click', e => {
@@ -2252,19 +2175,10 @@ async def dashboard():
         document.getElementById('charts-modal').addEventListener('click', e => {
             if (e.target.id === 'charts-modal') closeChartsModal();
         });
-        document.getElementById('crm-modal').addEventListener('click', e => {
-            if (e.target.id === 'crm-modal') closeCRMModal();
-        });
-        document.getElementById('prospect-detail-modal').addEventListener('click', e => {
-            if (e.target.id === 'prospect-detail-modal') closeProspectDetailModal();
-        });
 
         // =============================================================================
-        // CRM FUNCTIONS
+        // CRM FUNCTIONS (for sidebar widgets and Add to CRM)
         // =============================================================================
-
-        let crmSearchTimeout = null;
-        let currentProspectId = null;
 
         async function loadCRMStats() {
             try {
@@ -2281,166 +2195,8 @@ async def dashboard():
                 } else {
                     document.getElementById('crm-overdue-callbacks').textContent = '';
                 }
-
-                // Update modal stats
-                document.getElementById('crm-stat-new').textContent = stats.by_status?.new_lead || 0;
-                document.getElementById('crm-stat-contacted').textContent = stats.by_status?.contacted || 0;
-                document.getElementById('crm-stat-qualified').textContent = stats.by_status?.qualified || 0;
-                document.getElementById('crm-stat-won').textContent = stats.by_status?.won || 0;
-                document.getElementById('crm-stat-lost').textContent = stats.by_status?.lost || 0;
-                document.getElementById('crm-stat-value').textContent = `$${(stats.total_pipeline_value || 0).toLocaleString()}`;
-
-                document.getElementById('crm-modal-subtitle').textContent =
-                    `${stats.total_prospects} prospects | ${stats.upcoming_callbacks} upcoming callbacks | Won this month: $${(stats.won_value_this_month || 0).toLocaleString()}`;
             } catch (e) {
                 console.error('Error loading CRM stats:', e);
-            }
-        }
-
-        async function openCRMModal() {
-            document.getElementById('crm-modal').classList.remove('hidden');
-            loadCRMStats();
-            loadProspects();
-        }
-
-        function closeCRMModal() {
-            document.getElementById('crm-modal').classList.add('hidden');
-        }
-
-        function switchCRMTab(tab) {
-            // Update tab styles
-            document.getElementById('crm-tab-prospects').classList.remove('border-purple-600', 'text-purple-600');
-            document.getElementById('crm-tab-prospects').classList.add('border-transparent', 'text-gray-500');
-            document.getElementById('crm-tab-callbacks').classList.remove('border-purple-600', 'text-purple-600');
-            document.getElementById('crm-tab-callbacks').classList.add('border-transparent', 'text-gray-500');
-
-            document.getElementById(`crm-tab-${tab}`).classList.remove('border-transparent', 'text-gray-500');
-            document.getElementById(`crm-tab-${tab}`).classList.add('border-purple-600', 'text-purple-600');
-
-            // Show/hide content
-            document.getElementById('crm-prospects-content').classList.add('hidden');
-            document.getElementById('crm-callbacks-content').classList.add('hidden');
-            document.getElementById(`crm-${tab}-content`).classList.remove('hidden');
-
-            if (tab === 'callbacks') {
-                loadCallbacks();
-            } else {
-                loadProspects();
-            }
-        }
-
-        function debounceCRMSearch() {
-            clearTimeout(crmSearchTimeout);
-            crmSearchTimeout = setTimeout(loadProspects, 300);
-        }
-
-        async function loadProspects() {
-            const status = document.getElementById('crm-filter-status').value;
-            const priority = document.getElementById('crm-filter-priority').value;
-            const search = document.getElementById('crm-search').value;
-
-            let url = `${CRM_API}/prospects?page_size=100`;
-            if (status) url += `&status=${status}`;
-            if (priority) url += `&priority=${priority}`;
-            if (search) url += `&search=${encodeURIComponent(search)}`;
-
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-
-                const tbody = document.getElementById('crm-prospects-list');
-                if (!data.items || data.items.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-500">No prospects found. Add prospects from inspection details.</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = data.items.map(p => `
-                    <tr class="hover:bg-gray-50 cursor-pointer" onclick="openProspectDetail(${p.id})">
-                        <td class="px-4 py-3">
-                            <div class="font-medium text-gray-900">${p.estab_name || 'Unknown'}</div>
-                            <div class="text-xs text-gray-500">${p.activity_nr || ''}</div>
-                        </td>
-                        <td class="px-4 py-3 text-sm text-gray-600">
-                            ${p.site_city || ''}${p.site_city && p.site_state ? ', ' : ''}${p.site_state || ''}
-                        </td>
-                        <td class="px-4 py-3 text-center">
-                            <span class="px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(p.status)}">
-                                ${formatStatus(p.status)}
-                            </span>
-                        </td>
-                        <td class="px-4 py-3 text-center">
-                            ${p.priority ? `<span class="px-2 py-1 rounded text-xs ${getPriorityColor(p.priority)}">${p.priority}</span>` : '-'}
-                        </td>
-                        <td class="px-4 py-3 text-right text-sm">
-                            ${p.estimated_value ? '$' + p.estimated_value.toLocaleString() : '-'}
-                        </td>
-                        <td class="px-4 py-3 text-sm">
-                            <div class="text-gray-900">${p.next_action || '-'}</div>
-                            ${p.next_action_date ? `<div class="text-xs text-gray-500">${new Date(p.next_action_date).toLocaleDateString()}</div>` : ''}
-                        </td>
-                        <td class="px-4 py-3 text-center">
-                            <button onclick="event.stopPropagation(); openProspectDetail(${p.id})" class="text-blue-600 hover:text-blue-800 text-sm">View</button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (e) {
-                console.error('Error loading prospects:', e);
-                document.getElementById('crm-prospects-list').innerHTML =
-                    '<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">Error loading prospects</td></tr>';
-            }
-        }
-
-        async function loadCallbacks() {
-            try {
-                const response = await fetch(`${CRM_API}/callbacks?status=pending`);
-                const callbacks = await response.json();
-
-                const tbody = document.getElementById('crm-callbacks-list');
-                if (!callbacks || callbacks.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No pending callbacks</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = callbacks.map(c => {
-                    const callbackDate = new Date(c.callback_date);
-                    const isOverdue = callbackDate < new Date();
-                    return `
-                        <tr class="hover:bg-gray-50 ${isOverdue ? 'bg-red-50' : ''}">
-                            <td class="px-4 py-3">
-                                <div class="font-medium ${isOverdue ? 'text-red-600' : 'text-gray-900'}">${callbackDate.toLocaleDateString()}</div>
-                                <div class="text-xs text-gray-500">${callbackDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                            </td>
-                            <td class="px-4 py-3 text-sm text-gray-900">${c.estab_name || 'Unknown'}</td>
-                            <td class="px-4 py-3 text-sm text-gray-600">${c.callback_type || '-'}</td>
-                            <td class="px-4 py-3 text-sm text-gray-600">${c.notes || '-'}</td>
-                            <td class="px-4 py-3 text-center">
-                                <span class="px-2 py-1 rounded-full text-xs font-medium ${isOverdue ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">
-                                    ${isOverdue ? 'Overdue' : 'Pending'}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3 text-center space-x-2">
-                                <button onclick="completeCallback(${c.id})" class="text-green-600 hover:text-green-800 text-sm">Complete</button>
-                                <button onclick="openProspectDetail(${c.prospect_id})" class="text-blue-600 hover:text-blue-800 text-sm">View</button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
-            } catch (e) {
-                console.error('Error loading callbacks:', e);
-            }
-        }
-
-        async function completeCallback(callbackId) {
-            try {
-                await fetch(`${CRM_API}/callbacks/${callbackId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'completed' })
-                });
-                loadCallbacks();
-                loadCRMStats();
-            } catch (e) {
-                console.error('Error completing callback:', e);
             }
         }
 
@@ -2466,228 +2222,6 @@ async def dashboard():
             return labels[status] || status;
         }
 
-        function getPriorityColor(priority) {
-            const colors = {
-                'high': 'bg-red-100 text-red-800',
-                'medium': 'bg-yellow-100 text-yellow-800',
-                'low': 'bg-gray-100 text-gray-800'
-            };
-            return colors[priority] || '';
-        }
-
-        async function openProspectDetail(prospectId) {
-            currentProspectId = prospectId;
-            document.getElementById('prospect-detail-modal').classList.remove('hidden');
-
-            try {
-                const response = await fetch(`${CRM_API}/prospects/${prospectId}`);
-                const prospect = await response.json();
-
-                document.getElementById('prospect-detail-title').textContent = prospect.estab_name || 'Prospect Details';
-                document.getElementById('prospect-detail-subtitle').textContent =
-                    `${prospect.site_city || ''}${prospect.site_city && prospect.site_state ? ', ' : ''}${prospect.site_state || ''} | ${prospect.activity_nr || ''}`;
-
-                document.getElementById('prospect-detail-content').innerHTML = `
-                    <div class="grid grid-cols-2 gap-6">
-                        <!-- Left: Status & Info -->
-                        <div class="space-y-4">
-                            <div class="bg-gray-50 p-4 rounded-lg">
-                                <h4 class="font-medium text-gray-700 mb-3">Status & Priority</h4>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label class="block text-xs text-gray-500 mb-1">Status</label>
-                                        <select id="prospect-status" class="w-full border rounded px-2 py-1.5 text-sm" onchange="updateProspect()">
-                                            <option value="new_lead" ${prospect.status === 'new_lead' ? 'selected' : ''}>New Lead</option>
-                                            <option value="contacted" ${prospect.status === 'contacted' ? 'selected' : ''}>Contacted</option>
-                                            <option value="qualified" ${prospect.status === 'qualified' ? 'selected' : ''}>Qualified</option>
-                                            <option value="won" ${prospect.status === 'won' ? 'selected' : ''}>Won</option>
-                                            <option value="lost" ${prospect.status === 'lost' ? 'selected' : ''}>Lost</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs text-gray-500 mb-1">Priority</label>
-                                        <select id="prospect-priority" class="w-full border rounded px-2 py-1.5 text-sm" onchange="updateProspect()">
-                                            <option value="">None</option>
-                                            <option value="high" ${prospect.priority === 'high' ? 'selected' : ''}>High</option>
-                                            <option value="medium" ${prospect.priority === 'medium' ? 'selected' : ''}>Medium</option>
-                                            <option value="low" ${prospect.priority === 'low' ? 'selected' : ''}>Low</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="mt-3">
-                                    <label class="block text-xs text-gray-500 mb-1">Estimated Value ($)</label>
-                                    <input type="number" id="prospect-value" value="${prospect.estimated_value || ''}" class="w-full border rounded px-2 py-1.5 text-sm" onchange="updateProspect()">
-                                </div>
-                            </div>
-
-                            <div class="bg-gray-50 p-4 rounded-lg">
-                                <h4 class="font-medium text-gray-700 mb-3">Next Action</h4>
-                                <input type="text" id="prospect-next-action" value="${prospect.next_action || ''}" placeholder="What's the next step?" class="w-full border rounded px-2 py-1.5 text-sm mb-2" onchange="updateProspect()">
-                                <input type="date" id="prospect-next-date" value="${prospect.next_action_date || ''}" class="w-full border rounded px-2 py-1.5 text-sm" onchange="updateProspect()">
-                            </div>
-
-                            <div class="bg-gray-50 p-4 rounded-lg">
-                                <h4 class="font-medium text-gray-700 mb-3">Notes</h4>
-                                <textarea id="prospect-notes" rows="3" class="w-full border rounded px-2 py-1.5 text-sm" onchange="updateProspect()">${prospect.notes || ''}</textarea>
-                            </div>
-
-                            <div class="bg-gray-50 p-4 rounded-lg">
-                                <h4 class="font-medium text-gray-700 mb-3">Schedule Callback</h4>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <input type="datetime-local" id="new-callback-date" class="border rounded px-2 py-1.5 text-sm">
-                                    <select id="new-callback-type" class="border rounded px-2 py-1.5 text-sm">
-                                        <option value="call">Call</option>
-                                        <option value="email">Email</option>
-                                        <option value="meeting">Meeting</option>
-                                    </select>
-                                </div>
-                                <input type="text" id="new-callback-notes" placeholder="Callback notes..." class="w-full border rounded px-2 py-1.5 text-sm mt-2">
-                                <button onclick="scheduleCallback()" class="mt-2 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700">Schedule</button>
-                            </div>
-                        </div>
-
-                        <!-- Right: Activity Log -->
-                        <div>
-                            <div class="bg-gray-50 p-4 rounded-lg mb-4">
-                                <h4 class="font-medium text-gray-700 mb-3">Log Activity</h4>
-                                <div class="grid grid-cols-2 gap-2 mb-2">
-                                    <select id="new-activity-type" class="border rounded px-2 py-1.5 text-sm">
-                                        <option value="call">Call</option>
-                                        <option value="email">Email</option>
-                                        <option value="meeting">Meeting</option>
-                                        <option value="note">Note</option>
-                                        <option value="task">Task</option>
-                                    </select>
-                                    <input type="text" id="new-activity-subject" placeholder="Subject" class="border rounded px-2 py-1.5 text-sm">
-                                </div>
-                                <textarea id="new-activity-description" rows="2" placeholder="Description..." class="w-full border rounded px-2 py-1.5 text-sm mb-2"></textarea>
-                                <input type="text" id="new-activity-outcome" placeholder="Outcome (e.g., Left voicemail)" class="w-full border rounded px-2 py-1.5 text-sm mb-2">
-                                <button onclick="logActivity()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">Log Activity</button>
-                            </div>
-
-                            <h4 class="font-medium text-gray-700 mb-3">Activity History</h4>
-                            <div id="activity-list" class="space-y-2 max-h-80 overflow-auto">
-                                ${prospect.activities && prospect.activities.length > 0 ? prospect.activities.map(a => `
-                                    <div class="bg-white border rounded p-3">
-                                        <div class="flex justify-between items-start">
-                                            <span class="px-2 py-0.5 rounded text-xs ${getActivityTypeColor(a.activity_type)}">${a.activity_type}</span>
-                                            <span class="text-xs text-gray-500">${new Date(a.activity_date).toLocaleString()}</span>
-                                        </div>
-                                        ${a.subject ? `<div class="font-medium text-sm mt-1">${a.subject}</div>` : ''}
-                                        ${a.description ? `<div class="text-sm text-gray-600 mt-1">${a.description}</div>` : ''}
-                                        ${a.outcome ? `<div class="text-sm text-green-600 mt-1">→ ${a.outcome}</div>` : ''}
-                                    </div>
-                                `).join('') : '<div class="text-gray-500 text-sm">No activities yet</div>'}
-                            </div>
-                        </div>
-                    </div>
-                `;
-            } catch (e) {
-                console.error('Error loading prospect:', e);
-                document.getElementById('prospect-detail-content').innerHTML =
-                    '<div class="text-red-500">Error loading prospect details</div>';
-            }
-        }
-
-        function closeProspectDetailModal() {
-            document.getElementById('prospect-detail-modal').classList.add('hidden');
-            currentProspectId = null;
-        }
-
-        function getActivityTypeColor(type) {
-            const colors = {
-                'call': 'bg-blue-100 text-blue-800',
-                'email': 'bg-green-100 text-green-800',
-                'meeting': 'bg-purple-100 text-purple-800',
-                'note': 'bg-gray-100 text-gray-800',
-                'task': 'bg-yellow-100 text-yellow-800'
-            };
-            return colors[type] || 'bg-gray-100 text-gray-800';
-        }
-
-        async function updateProspect() {
-            if (!currentProspectId) return;
-
-            const data = {
-                status: document.getElementById('prospect-status').value,
-                priority: document.getElementById('prospect-priority').value || null,
-                estimated_value: parseFloat(document.getElementById('prospect-value').value) || null,
-                next_action: document.getElementById('prospect-next-action').value || null,
-                next_action_date: document.getElementById('prospect-next-date').value || null,
-                notes: document.getElementById('prospect-notes').value || null
-            };
-
-            try {
-                await fetch(`${CRM_API}/prospects/${currentProspectId}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                loadCRMStats();
-                loadProspects();
-            } catch (e) {
-                console.error('Error updating prospect:', e);
-            }
-        }
-
-        async function logActivity() {
-            if (!currentProspectId) return;
-
-            const data = {
-                activity_type: document.getElementById('new-activity-type').value,
-                subject: document.getElementById('new-activity-subject').value || null,
-                description: document.getElementById('new-activity-description').value || null,
-                outcome: document.getElementById('new-activity-outcome').value || null
-            };
-
-            try {
-                await fetch(`${CRM_API}/prospects/${currentProspectId}/activities`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                // Clear form
-                document.getElementById('new-activity-subject').value = '';
-                document.getElementById('new-activity-description').value = '';
-                document.getElementById('new-activity-outcome').value = '';
-                // Reload prospect detail
-                openProspectDetail(currentProspectId);
-            } catch (e) {
-                console.error('Error logging activity:', e);
-            }
-        }
-
-        async function scheduleCallback() {
-            if (!currentProspectId) return;
-
-            const callbackDate = document.getElementById('new-callback-date').value;
-            if (!callbackDate) {
-                alert('Please select a date and time');
-                return;
-            }
-
-            const data = {
-                callback_date: callbackDate,
-                callback_type: document.getElementById('new-callback-type').value,
-                notes: document.getElementById('new-callback-notes').value || null
-            };
-
-            try {
-                await fetch(`${CRM_API}/prospects/${currentProspectId}/callbacks`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                // Clear form
-                document.getElementById('new-callback-date').value = '';
-                document.getElementById('new-callback-notes').value = '';
-                loadCRMStats();
-                alert('Callback scheduled!');
-            } catch (e) {
-                console.error('Error scheduling callback:', e);
-            }
-        }
-
         async function addToCRM(inspectionId) {
             try {
                 const response = await fetch(`${CRM_API}/prospects`, {
@@ -2708,19 +2242,20 @@ async def dashboard():
                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(prospect.status)}">
                                     ${formatStatus(prospect.status)}
                                 </span>
-                                <button onclick="openProspectDetail(${prospect.id})"
+                                <a href="/crm"
                                     class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
                                     <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                                     </svg>
                                     View in CRM
-                                </button>
+                                </a>
                             </div>
                         `;
                     }
 
-                    openProspectDetail(prospect.id);
+                    // Navigate to CRM page
+                    window.location.href = '/crm';
                 } else {
                     const error = await response.json();
                     alert(error.detail || 'Error adding to CRM');

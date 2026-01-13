@@ -216,10 +216,12 @@ class WebEnrichmentService:
             "website_url": None,
             "data": None,
             "error": None,
-            "sources_searched": []
+            "sources_searched": [],
+            "confidence": "low"
         }
 
         all_content = []
+        has_verified_source = False  # Track if we have a high-confidence source
 
         # 1. Find and fetch company website
         logger.info(f"Starting enrichment for: {company_name}, {city}, {state}")
@@ -230,6 +232,7 @@ class WebEnrichmentService:
             content = await self._fetch_with_jina(website_url, max_chars=12000)
             if content:
                 all_content.append(f"=== COMPANY WEBSITE ({website_url}) ===\n{content}")
+                has_verified_source = True
 
         # 2. Find LinkedIn company page
         linkedin_url = await self.search_linkedin_profile(company_name, state)
@@ -254,14 +257,16 @@ class WebEnrichmentService:
             content = await self._fetch_with_jina(sos_url, max_chars=5000)
             if content:
                 all_content.append(f"=== SECRETARY OF STATE ({sos_url}) ===\n{content}")
+                has_verified_source = True  # SOS records are authoritative
 
-        # 5. Search for leadership/contacts
-        leadership_urls = await self.search_leadership_contacts(company_name, state)
-        for url in leadership_urls[:3]:  # Limit to top 3 to save tokens
-            result["sources_searched"].append(("leadership_search", url))
-            content = await self._fetch_with_jina(url, max_chars=5000)
-            if content:
-                all_content.append(f"=== LEADERSHIP/CONTACT PAGE ({url}) ===\n{content}")
+        # 5. Search for leadership/contacts - only if we have verified sources
+        if has_verified_source:
+            leadership_urls = await self.search_leadership_contacts(company_name, state)
+            for url in leadership_urls[:3]:  # Limit to top 3 to save tokens
+                result["sources_searched"].append(("leadership_search", url))
+                content = await self._fetch_with_jina(url, max_chars=5000)
+                if content:
+                    all_content.append(f"=== LEADERSHIP/CONTACT PAGE ({url}) ===\n{content}")
 
         if not all_content:
             result["error"] = "Could not fetch content from any sources"
@@ -277,12 +282,37 @@ class WebEnrichmentService:
 
         logger.info(f"Extracting data from {len(all_content)} sources ({len(combined_content)} chars)")
 
-        # Extract comprehensive company data
-        extraction_prompt = f"""Analyze all the following content gathered about "{company_name}" located in {city or 'unknown city'}, {state or 'unknown state'}.
+        # Build location context for verification
+        location_context = ""
+        if city and state:
+            location_context = f"in or near {city}, {state}"
+        elif state:
+            location_context = f"in {state}"
+        elif city:
+            location_context = f"in or near {city}"
 
-Extract ALL available information into this JSON structure. Search thoroughly through all sources - company website, LinkedIn, Facebook, Secretary of State records, and any leadership pages.
+        # Extract comprehensive company data with VERIFICATION
+        extraction_prompt = f"""You are verifying and extracting data about a specific company.
+
+TARGET COMPANY: "{company_name}"
+EXPECTED LOCATION: {location_context if location_context else "unknown"}
+
+CRITICAL VERIFICATION STEP:
+First, determine if the content below is ACTUALLY about the target company "{company_name}" {location_context}.
+Look for these verification signals:
+- Company name matches (exact or very close match)
+- Location matches (same city/state or nearby)
+- Industry/business type seems consistent
+
+If the content appears to be about a DIFFERENT company (wrong name, wrong location, different business entirely), set "is_verified_match" to false.
+
+Extract information into this JSON structure:
 
 {{
+    "is_verified_match": true,
+    "match_confidence": "high/medium/low",
+    "verification_notes": "Brief explanation of why this is or isn't the right company",
+
     "official_name": "The official/legal company name",
     "dba_names": ["Any 'doing business as' names"],
     "description": "What the company does (2-3 sentences)",
@@ -349,13 +379,13 @@ Extract ALL available information into this JSON structure. Search thoroughly th
 }}
 
 IMPORTANT INSTRUCTIONS:
-- Look carefully for OWNER names, CEO, President, managers - these are critical
-- Include LinkedIn profile URLs for individuals when found (linkedin.com/in/...)
-- Extract phone numbers in any format found
-- For year_founded, look in Secretary of State records, About pages, LinkedIn
-- Include ALL addresses found - main office, branches, job sites
+- VERIFY this is the correct company before extracting data
+- If sources show conflicting companies, only extract from verified matching sources
+- Set "is_verified_match" to false if you cannot confirm this is the target company
+- Set "match_confidence" to "low" if only social media without clear location match
 - Use null for any field where information is not found
-- Do not make up information - only include what's explicitly in the content
+- NEVER make up or guess information - only include what's explicitly in the content
+- If the company name in the content is significantly different, this is likely the WRONG company
 
 Content from multiple sources:
 {combined_content}
@@ -367,6 +397,24 @@ Content from multiple sources:
             result["error"] = "Could not extract company data"
             return result
 
+        # Check verification status
+        is_verified = extracted_data.get("is_verified_match", False)
+        match_confidence = extracted_data.get("match_confidence", "low")
+
+        if not is_verified:
+            result["error"] = f"Could not verify this data matches {company_name}. {extracted_data.get('verification_notes', '')}"
+            result["confidence"] = "none"
+            logger.warning(f"Enrichment failed verification for {company_name}: {extracted_data.get('verification_notes', '')}")
+            return result
+
+        # Set confidence based on sources and AI confidence
+        if has_verified_source and match_confidence == "high":
+            result["confidence"] = "high"
+        elif has_verified_source or match_confidence in ["high", "medium"]:
+            result["confidence"] = "medium"
+        else:
+            result["confidence"] = "low"
+
         # Add the URLs we found directly
         if linkedin_url and extracted_data.get("social_media"):
             extracted_data["social_media"]["linkedin_url"] = linkedin_url
@@ -375,7 +423,7 @@ Content from multiple sources:
 
         result["success"] = True
         result["data"] = extracted_data
-        logger.info(f"Successfully enriched {company_name} with data from {len(result['sources_searched'])} sources")
+        logger.info(f"Successfully enriched {company_name} (confidence: {result['confidence']}) with data from {len(result['sources_searched'])} sources")
 
         return result
 

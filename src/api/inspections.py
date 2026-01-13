@@ -531,6 +531,7 @@ async def get_recent_inspections(
             "site_state": inspection.site_state,
             "insp_type": inspection.insp_type,
             "open_date": inspection.open_date.isoformat() if inspection.open_date else None,
+            "total_current_penalty": inspection.total_current_penalty or 0,
         })
 
     return {
@@ -751,6 +752,7 @@ class EnrichmentResponse(BaseModel):
     website_url: Optional[str]
     data: Optional[dict]
     error: Optional[str]
+    confidence: Optional[str] = None  # high, medium, low, or none
 
 
 class ContactResponse(BaseModel):
@@ -798,6 +800,7 @@ class CompanyDataResponse(BaseModel):
     youtube_url: Optional[str]
     other_addresses: Optional[str]  # JSON string
     services: Optional[str]  # JSON string
+    confidence: Optional[str] = None  # high, medium, low - data verification confidence
     contacted: bool = False
     contacted_date: Optional[str] = None
     contact_notes: Optional[str] = None
@@ -938,6 +941,9 @@ async def enrich_inspection(inspection_id: int, db: Session = Depends(get_db)):
                 existing_company.postal_code = hq.get("postal_code")
                 existing_company.other_addresses = other_locations_json
 
+                # Data quality
+                existing_company.confidence = result.get("confidence", "unknown")
+
                 company = existing_company
             else:
                 # Create new company record
@@ -969,6 +975,7 @@ async def enrich_inspection(inspection_id: int, db: Session = Depends(get_db)):
                     state=hq.get("state"),
                     postal_code=hq.get("postal_code"),
                     other_addresses=other_locations_json,
+                    confidence=result.get("confidence", "unknown"),
                 )
                 db.add(company)
                 db.flush()  # Get company ID
@@ -1010,7 +1017,8 @@ async def enrich_inspection(inspection_id: int, db: Session = Depends(get_db)):
                 success=True,
                 website_url=result.get("website_url"),
                 data=result.get("data"),
-                error=None
+                error=None,
+                confidence=result.get("confidence", "unknown")
             )
         else:
             inspection.enrichment_status = EnrichmentStatus.FAILED
@@ -1021,7 +1029,8 @@ async def enrich_inspection(inspection_id: int, db: Session = Depends(get_db)):
                 success=False,
                 website_url=result.get("website_url"),
                 data=None,
-                error=result.get("error")
+                error=result.get("error"),
+                confidence=result.get("confidence", "none")
             )
 
     except Exception as e:
@@ -1080,6 +1089,7 @@ async def get_inspection_company(inspection_id: int, db: Session = Depends(get_d
         youtube_url=company.youtube_url,
         other_addresses=company.other_addresses,
         services=company.services,
+        confidence=company.confidence,
         contacted=company.contacted or False,
         contacted_date=company.contacted_date.isoformat() if company.contacted_date else None,
         contact_notes=company.contact_notes,
@@ -1175,6 +1185,7 @@ async def get_company_by_id(company_id: int, db: Session = Depends(get_db)):
         youtube_url=company.youtube_url,
         other_addresses=company.other_addresses,
         services=company.services,
+        confidence=company.confidence,
         contacted=company.contacted or False,
         contacted_date=company.contacted_date.isoformat() if company.contacted_date else None,
         contact_notes=company.contact_notes,
