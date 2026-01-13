@@ -147,11 +147,11 @@ class ApolloClient:
 
         payload = {
             "per_page": min(limit, 100),
-            "reveal_personal_emails": True,
-            "reveal_phone_number": True,
+            "page": 1,
         }
 
         if organization_domain:
+            # Use array format for domain filter
             payload["q_organization_domains"] = organization_domain
         elif organization_name:
             payload["q_organization_name"] = organization_name
@@ -159,13 +159,21 @@ class ApolloClient:
             raise ValueError("Either organization_name or organization_domain required")
 
         if titles:
+            # person_titles should be an array of strings
             payload["person_titles"] = titles
+
+        logger.info(f"Apollo people search payload: {payload}")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(
                     url, headers=self.headers, json=payload
                 )
+
+                # Log response for debugging
+                if response.status_code != 200:
+                    logger.error(f"Apollo people search response: {response.text}")
+
                 response.raise_for_status()
                 data = response.json()
 
@@ -178,6 +186,7 @@ class ApolloClient:
 
             except httpx.HTTPStatusError as e:
                 logger.error(f"HTTP error searching people: {e.response.status_code}")
+                logger.error(f"Response body: {e.response.text}")
                 if e.response.status_code == 429:
                     logger.warning("Rate limited by Apollo API")
                 raise
