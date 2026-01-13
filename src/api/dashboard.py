@@ -1812,7 +1812,7 @@ async def osha_dashboard():
                                     </ul>
                                 </div>
                             ` : ''}
-                            <button onclick="confirmAndSaveEnrichment(${inspectionId})"
+                            <button id="confirm-save-btn" onclick="confirmAndSaveEnrichment(${inspectionId})"
                                 class="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
                                 Confirm & Save to Database
                             </button>
@@ -1846,9 +1846,24 @@ async def osha_dashboard():
         }
 
         async function confirmAndSaveEnrichment(inspectionId) {
-            if (!currentApolloResult?.organization) {
-                alert('No Apollo data to save');
+            console.log('confirmAndSaveEnrichment called, inspectionId:', inspectionId);
+            console.log('currentApolloResult:', currentApolloResult);
+
+            if (!currentApolloResult) {
+                alert('No Apollo data available. Please run the Apollo search first.');
                 return;
+            }
+
+            if (!currentApolloResult.organization) {
+                alert('No organization data found in Apollo results.');
+                return;
+            }
+
+            // Disable button to prevent double-clicks
+            const saveBtn = document.getElementById('confirm-save-btn');
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving...';
             }
 
             try {
@@ -1857,6 +1872,8 @@ async def osha_dashboard():
                     ...(currentApolloResult.people?.safety_contacts || []),
                     ...(currentApolloResult.people?.executive_contacts || [])
                 ];
+
+                console.log('Sending to API:', { organization: currentApolloResult.organization, contacts });
 
                 const response = await fetch(`/api/enrichment/confirm/${inspectionId}`, {
                     method: 'POST',
@@ -1896,10 +1913,22 @@ async def osha_dashboard():
                     }
                 } else {
                     alert(`Error saving: ${result.error}`);
+                    // Re-enable button on error
+                    const saveBtn = document.getElementById('confirm-save-btn');
+                    if (saveBtn) {
+                        saveBtn.disabled = false;
+                        saveBtn.textContent = 'Confirm & Save to Database';
+                    }
                 }
             } catch (e) {
                 console.error('Error saving enrichment:', e);
-                alert('Error saving enrichment data');
+                alert('Error saving enrichment data: ' + e.message);
+                // Re-enable button on error
+                const saveBtn = document.getElementById('confirm-save-btn');
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Confirm & Save to Database';
+                }
             }
         }
 
