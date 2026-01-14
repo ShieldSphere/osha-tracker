@@ -216,12 +216,20 @@ async def preview_batch_enrichment(
 
 
 @router.post("/web-enrich/{inspection_id}")
-async def run_web_enrichment(inspection_id: int):
+async def run_web_enrichment(
+    inspection_id: int,
+    quick: bool = Query(True, description="Quick mode: just find website (fast). Full mode: complete enrichment (slow)"),
+):
     """
     Run free web enrichment for an inspection.
 
     This searches the web for company info without using Apollo credits.
     Useful for finding domain/website before Apollo search.
+
+    Args:
+        inspection_id: The inspection to enrich
+        quick: If True (default), just find the website domain (fast, Vercel-safe).
+               If False, run full enrichment with all sources (may timeout on serverless).
     """
     with get_db_session() as db:
         inspection = db.query(Inspection).filter(Inspection.id == inspection_id).first()
@@ -231,22 +239,174 @@ async def run_web_enrichment(inspection_id: int):
         # Normalize company name first
         normalized_name, _ = normalize_company_name(inspection.estab_name)
 
-        # Run web enrichment
-        result = await web_enrichment_service.enrich_company(
-            company_name=normalized_name,
-            city=inspection.site_city,
-            state=inspection.site_state,
-        )
+        if quick:
+            # Quick mode: just find the website (fast, works on Vercel)
+            try:
+                website_url = await web_enrichment_service.search_company_website(
+                    company_name=normalized_name,
+                    city=inspection.site_city,
+                    state=inspection.site_state,
+                )
+                return {
+                    "inspection_id": inspection_id,
+                    "company_name": normalized_name,
+                    "success": website_url is not None,
+                    "website_url": website_url,
+                    "confidence": "medium" if website_url else "none",
+                    "data": None,
+                    "sources_searched": [("duckduckgo", "quick search")],
+                    "error": None if website_url else "No website found",
+                }
+            except Exception as e:
+                logger.error(f"Quick web enrichment error: {e}")
+                return {
+                    "inspection_id": inspection_id,
+                    "company_name": normalized_name,
+                    "success": False,
+                    "website_url": None,
+                    "confidence": "none",
+                    "data": None,
+                    "sources_searched": [],
+                    "error": str(e),
+                }
+        else:
+            # Full mode: complete enrichment (may timeout on serverless)
+            result = await web_enrichment_service.enrich_company(
+                company_name=normalized_name,
+                city=inspection.site_city,
+                state=inspection.site_state,
+            )
+
+            return {
+                "inspection_id": inspection_id,
+                "company_name": normalized_name,
+                "success": result.get("success", False),
+                "website_url": result.get("website_url"),
+                "confidence": result.get("confidence", "none"),
+                "data": result.get("data"),
+                "sources_searched": result.get("sources_searched", []),
+                "dba_names_found": result.get("dba_names_found", []),
+                "error": result.get("error"),
+            }
+
+
+class SaveWebEnrichmentRequest(BaseModel):
+    """Request body for saving web enrichment data."""
+    data: dict
+    website_url: Optional[str] = None
+    confidence: str = "medium"
+
+
+@router.post("/save-web-enrichment/{inspection_id}")
+async def save_web_enrichment(inspection_id: int, request: SaveWebEnrichmentRequest):
+    """
+    Save web enrichment data to the database.
+
+    This saves the free web scraping results so they can be edited before Apollo enrichment.
+    """
+    import json
+
+    with get_db_session() as db:
+        inspection = db.query(Inspection).filter(Inspection.id == inspection_id).first()
+        if not inspection:
+            raise HTTPException(status_code=404, detail="Inspection not found")
+
+        data = request.data
+
+        # Check if company already exists
+        existing_company = db.query(Company).filter(
+            Company.inspection_id == inspection_id
+        ).first()
+
+        company_data = {
+            "name": data.get("operating_name") or data.get("legal_name") or data.get("official_name") or inspection.estab_name,
+            "legal_name": data.get("legal_name") or data.get("official_name"),
+            "operating_name": data.get("operating_name"),
+            "dba_names": json.dumps(data.get("dba_names", [])) if data.get("dba_names") else None,
+            "parent_company": data.get("parent_company"),
+            "domain": data.get("social_media", {}).get("website", "").replace("https://", "").replace("http://", "").split("/")[0] if data.get("social_media", {}).get("website") else None,
+            "website": data.get("social_media", {}).get("website") or request.website_url,
+            "industry": data.get("industry"),
+            "sub_industry": data.get("sub_industry"),
+            "description": data.get("description"),
+            "services": json.dumps(data.get("services", [])) if data.get("services") else None,
+            "employee_count": data.get("employee_count"),
+            "employee_range": data.get("employee_range"),
+            "year_founded": data.get("year_founded"),
+            "phone": data.get("contact_info", {}).get("main_phone"),
+            "email": data.get("contact_info", {}).get("main_email"),
+            "address": data.get("headquarters", {}).get("address"),
+            "city": data.get("headquarters", {}).get("city"),
+            "state": data.get("headquarters", {}).get("state"),
+            "postal_code": data.get("headquarters", {}).get("postal_code"),
+            "linkedin_url": data.get("social_media", {}).get("linkedin_url"),
+            "facebook_url": data.get("social_media", {}).get("facebook_url"),
+            "twitter_url": data.get("social_media", {}).get("twitter_url"),
+            "instagram_url": data.get("social_media", {}).get("instagram_url"),
+            "youtube_url": data.get("social_media", {}).get("youtube_url"),
+            "registration_state": data.get("business_registration", {}).get("state"),
+            "registration_number": data.get("business_registration", {}).get("registration_number"),
+            "registered_agent": data.get("business_registration", {}).get("registered_agent"),
+            "business_type": data.get("business_registration", {}).get("business_type"),
+            "confidence": request.confidence,
+            "enrichment_source": "web",
+            "web_enrichment_data": json.dumps(data),
+            "web_enriched_at": datetime.utcnow(),
+        }
+
+        if existing_company:
+            # Update existing company
+            for key, value in company_data.items():
+                if value is not None:
+                    setattr(existing_company, key, value)
+            existing_company.updated_at = datetime.utcnow()
+            company = existing_company
+        else:
+            # Create new company
+            company = Company(
+                inspection_id=inspection_id,
+                **{k: v for k, v in company_data.items() if v is not None}
+            )
+            db.add(company)
+            db.flush()
+
+        # Save key personnel as contacts
+        contacts_saved = 0
+        for person in data.get("key_personnel", []):
+            if person.get("name"):
+                existing_contact = None
+                if person.get("linkedin_url"):
+                    existing_contact = db.query(Contact).filter(
+                        Contact.company_id == company.id,
+                        Contact.linkedin_url == person["linkedin_url"]
+                    ).first()
+
+                if not existing_contact:
+                    # Determine contact type
+                    title_lower = (person.get("title") or "").lower()
+                    safety_keywords = ["safety", "ehs", "compliance", "risk", "health"]
+                    contact_type = "safety" if any(kw in title_lower for kw in safety_keywords) else "executive"
+
+                    contact = Contact(
+                        company_id=company.id,
+                        full_name=person.get("name"),
+                        title=person.get("title"),
+                        email=person.get("email"),
+                        phone=person.get("phone"),
+                        linkedin_url=person.get("linkedin_url"),
+                        contact_type=contact_type,
+                    )
+                    db.add(contact)
+                    contacts_saved += 1
+
+        db.commit()
 
         return {
-            "inspection_id": inspection_id,
-            "company_name": normalized_name,
-            "success": result.get("success", False),
-            "website_url": result.get("website_url"),
-            "confidence": result.get("confidence", "none"),
-            "data": result.get("data"),
-            "sources_searched": result.get("sources_searched", []),
-            "error": result.get("error"),
+            "success": True,
+            "company_id": company.id,
+            "company_name": company.name,
+            "contacts_saved": contacts_saved,
+            "enrichment_source": "web",
         }
 
 
@@ -441,21 +601,36 @@ async def confirm_enrichment(
 class RevealContactsRequest(BaseModel):
     """Request body for revealing contact info."""
     person_ids: List[str]
+    reveal_email: bool = True
+    reveal_phone: bool = False
 
 
 @router.post("/reveal-contacts")
 async def reveal_contacts(request: RevealContactsRequest):
     """
-    Reveal email and phone for selected contacts (uses Apollo credits).
+    Reveal email and/or phone for selected contacts (uses Apollo credits).
 
     This is Step 2 of the enrichment process - only called for contacts
     the user explicitly selects to reveal.
+
+    Args:
+        person_ids: List of Apollo person IDs to reveal
+        reveal_email: Whether to reveal email addresses (default True)
+        reveal_phone: Whether to reveal phone numbers (requires webhook - default False)
     """
     if not request.person_ids:
         return {
             "success": False,
             "contacts": [],
             "error": "No person IDs provided",
+            "credits_used": 0,
+        }
+
+    if not request.reveal_email and not request.reveal_phone:
+        return {
+            "success": False,
+            "contacts": [],
+            "error": "Must select at least email or phone to reveal",
             "credits_used": 0,
         }
 
@@ -467,7 +642,11 @@ async def reveal_contacts(request: RevealContactsRequest):
 
         for person_id in request.person_ids:
             try:
-                person = await apollo_client.reveal_contact_info(person_id)
+                person = await apollo_client.reveal_contact_info(
+                    person_id,
+                    reveal_email=request.reveal_email,
+                    reveal_phone=request.reveal_phone
+                )
                 if person:
                     # Determine contact type based on title
                     title = (person.get("title") or "").lower()

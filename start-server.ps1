@@ -1,5 +1,5 @@
-# OSHA Tracker Server Management Script (PowerShell)
-# This script manages the OSHA Tracker server with auto-restart on crash
+# TSG Safety Tracker Server Management Script (PowerShell)
+# This script manages the TSG Safety Tracker server with auto-restart on crash
 
 param(
     [switch]$NoReload,
@@ -14,7 +14,7 @@ Set-Location $scriptDir
 
 function Write-Header {
     Write-Host "============================================================" -ForegroundColor Cyan
-    Write-Host "OSHA Tracker Server Manager" -ForegroundColor Cyan
+    Write-Host "TSG Safety Tracker Server Manager" -ForegroundColor Cyan
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -69,7 +69,7 @@ function Start-ServerWithAutoRestart {
     while ($restartCount -lt $maxRestarts) {
         Write-Host ""
         Write-Host "============================================================" -ForegroundColor Cyan
-        Write-Host "Starting OSHA Tracker Server (Attempt $($restartCount + 1))" -ForegroundColor Cyan
+        Write-Host "Starting TSG Safety Tracker Server (Attempt $($restartCount + 1))" -ForegroundColor Cyan
         Write-Host "============================================================" -ForegroundColor Cyan
         Write-Host ""
 

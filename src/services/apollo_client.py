@@ -270,11 +270,20 @@ class ApolloClient:
 
     def parse_person(self, raw: Dict[str, Any], contact_type: str) -> Dict[str, Any]:
         """Parse raw Apollo person data into our model format."""
+        # Build full name from first/last if 'name' field is missing
+        first_name = raw.get("first_name") or ""
+        last_name = raw.get("last_name") or ""
+        full_name = raw.get("name") or f"{first_name} {last_name}".strip()
+
+        # If still no name, try organization_name as fallback context
+        if not full_name:
+            full_name = "Unknown Contact"
+
         return {
             "apollo_person_id": raw.get("id"),
-            "first_name": raw.get("first_name"),
-            "last_name": raw.get("last_name"),
-            "full_name": raw.get("name"),
+            "first_name": first_name or None,
+            "last_name": last_name or None,
+            "full_name": full_name,
             "title": raw.get("title"),
             "email": raw.get("email"),
             "email_status": raw.get("email_status"),
@@ -286,12 +295,21 @@ class ApolloClient:
             "contact_type": contact_type,
         }
 
-    async def reveal_contact_info(self, person_id: str) -> Optional[Dict[str, Any]]:
+    async def reveal_contact_info(
+        self,
+        person_id: str,
+        reveal_email: bool = True,
+        reveal_phone: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
-        Reveal email and phone for a specific person (uses credits).
+        Reveal email and/or phone for a specific person (uses credits).
+
+        Note: Phone reveal requires a webhook_url which we don't currently support.
 
         Args:
             person_id: Apollo person ID
+            reveal_email: Whether to reveal email (default True)
+            reveal_phone: Whether to attempt phone reveal (requires webhook setup)
 
         Returns:
             Person data with revealed email/phone
@@ -301,11 +319,26 @@ class ApolloClient:
         payload = {
             "api_key": self.api_key,
             "id": person_id,
-            "reveal_personal_emails": True,
-            "reveal_phone_number": True,
         }
 
-        logger.info(f"Revealing contact info for person_id: {person_id}")
+        # Add email reveal if requested
+        if reveal_email:
+            payload["reveal_personal_emails"] = True
+
+        # Phone reveal requires webhook_url - warn user but still try if requested
+        if reveal_phone:
+            logger.warning("Phone reveal requested - requires webhook_url to receive async phone data")
+            # Uncomment below when webhook is configured:
+            # payload["reveal_phone_number"] = True
+            # payload["webhook_url"] = "https://your-domain.com/api/webhooks/apollo"
+
+        reveal_types = []
+        if reveal_email:
+            reveal_types.append("email")
+        if reveal_phone:
+            reveal_types.append("phone")
+
+        logger.info(f"Revealing {', '.join(reveal_types) or 'nothing'} for person_id: {person_id}")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
@@ -321,7 +354,7 @@ class ApolloClient:
 
                 person = data.get("person")
                 if person:
-                    logger.info(f"Revealed contact info for: {person.get('name')}")
+                    logger.info(f"Revealed contact info for: {person.get('name')} - email: {person.get('email')}")
                 return person
 
             except httpx.HTTPStatusError as e:

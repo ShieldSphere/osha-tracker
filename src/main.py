@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager with error handling."""
     # Startup
-    logger.info("Starting TSG Safety OSHA Tracker application...")
+    logger.info("Starting TSG Safety Tracker application...")
 
     try:
         init_db()
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
-    logger.info("Shutting down TSG Safety OSHA Tracker application...")
+    logger.info("Shutting down TSG Safety Tracker application...")
 
     if os.environ.get("VERCEL") != "1":
         try:

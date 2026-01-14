@@ -1,5 +1,5 @@
 """
-Run the OSHA Tracker application.
+Run the TSG Safety Tracker application.
 
 Usage:
     python run.py              # Run the web server
@@ -47,7 +47,7 @@ def clear_pycache():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="OSHA Tracker Application")
+    parser = argparse.ArgumentParser(description="TSG Safety Tracker Application")
     parser.add_argument("--sync", action="store_true", help="Run a manual sync")
     parser.add_argument("--init-db", action="store_true", help="Initialize database")
     parser.add_argument("--days", type=int, default=30, help="Days to look back for sync")
@@ -82,7 +82,7 @@ def main():
     from src.config import settings
 
     logger.info("=" * 60)
-    logger.info("Starting OSHA Tracker...")
+    logger.info("Starting TSG Safety Tracker...")
     logger.info(f"Dashboard: http://{settings.API_HOST}:{settings.API_PORT}")
     logger.info(f"API Docs:  http://{settings.API_HOST}:{settings.API_PORT}/docs")
     logger.info(f"Auto-reload: {'disabled' if args.no_reload else 'enabled'}")

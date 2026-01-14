@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM OSHA Tracker Daily Sync - API-based
+REM TSG Safety Tracker Daily Sync - API-based
 REM ============================================================
 REM
 REM This script syncs NEW OSHA records from the DOL API.
@@ -13,7 +13,7 @@ REM   run_daily_sync.bat 50 silent - Run silently (for Task Scheduler)
 REM
 REM TASK SCHEDULER SETUP:
 REM 1. Open Task Scheduler
-REM 2. Create Basic Task -> Name: "OSHA Daily Sync"
+REM 2. Create Basic Task -> Name: "TSG Safety Tracker Daily Sync"
 REM 3. Trigger: Daily at 6:00 AM
 REM 4. Action: Start a program
 REM 5. Program: cmd.exe
@@ -25,7 +25,7 @@ REM ============================================================
 cd /d "%~dp0"
 
 echo ============================================================
-echo OSHA Daily Sync (API) - %date% %time%
+echo TSG Safety Tracker Daily Sync (API) - %date% %time%
 echo ============================================================
 echo.
 

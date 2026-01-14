@@ -1,9 +1,9 @@
 @echo off
-REM OSHA Tracker Server Management Script (Windows Batch)
-REM This script manages the OSHA Tracker server with auto-restart capability
+REM TSG Safety Tracker Server Management Script (Windows Batch)
+REM This script manages the TSG Safety Tracker server with auto-restart capability
 
 echo ============================================================
-echo OSHA Tracker Server Manager
+echo TSG Safety Tracker Server Manager
 echo ============================================================
 echo.
 

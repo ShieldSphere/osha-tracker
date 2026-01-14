@@ -229,6 +229,18 @@ class Company(Base):
     domain = Column(String(255))
     website = Column(String(500))
 
+    # DBA/Operating name fields (from web enrichment)
+    legal_name = Column(String(255))  # Registered legal name
+    operating_name = Column(String(255))  # DBA/trade name
+    dba_names = Column(Text)  # JSON array of all DBA names
+    parent_company = Column(String(255))  # Parent company if subsidiary
+
+    # Enrichment source tracking
+    enrichment_source = Column(String(50))  # 'web', 'apollo', 'both', 'manual'
+    web_enrichment_data = Column(Text)  # Full JSON from web enrichment (for reference)
+    web_enriched_at = Column(DateTime)
+    apollo_enriched_at = Column(DateTime)
+
     # Company details
     industry = Column(String(255))
     sub_industry = Column(String(255))

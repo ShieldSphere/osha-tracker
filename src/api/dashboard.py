@@ -13,7 +13,7 @@ async def osha_dashboard():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OSHA Tracker - TSG Safety</title>
+    <title>TSG Safety Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -1633,22 +1633,44 @@ async def osha_dashboard():
 
                     <!-- Actions -->
                     <div class="p-6 border-t bg-gray-50">
-                        <div class="flex justify-between items-center">
-                            <div class="text-sm text-gray-500">
-                                <span id="credits-estimate">Estimated credits: ${preview.estimated_credits}</span>
+                        <!-- Enrichment Options Explanation -->
+                        <div class="mb-4 p-3 bg-gray-100 rounded-lg border">
+                            <p class="text-sm text-gray-700 font-medium mb-2">Enrichment Options:</p>
+                            <div class="text-xs text-gray-600 space-y-1">
+                                <p><strong>Web Scraping (Free):</strong> Searches DuckDuckGo, LinkedIn, Secretary of State. Uses OpenAI to extract data. Results are saved and can be edited.</p>
+                                <p><strong>Apollo (Credits):</strong> Uses Apollo API for verified company & contact data. Best when you have a domain/website.</p>
                             </div>
-                            <div class="flex gap-3">
+                        </div>
+
+                        <!-- Web Enrichment Result (if run) - moved here for visibility -->
+                        <div id="web-enrichment-result-actions" class="hidden mb-4"></div>
+
+                        <div class="flex flex-col gap-3">
+                            <!-- Top row: Cancel and Web Scraping -->
+                            <div class="flex justify-between items-center">
                                 <button onclick="closeEnrichmentPreviewModal()"
                                     class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
                                     Cancel
                                 </button>
-                                <button onclick="runFullEnrichment(${preview.inspection_id})" id="btn-full-enrich"
-                                    class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 ${preview.recommendation === 'do_not_enrich' ? 'opacity-50' : ''}"
-                                    ${preview.recommendation === 'do_not_enrich' ? 'disabled title="Data quality too low"' : ''}>
+                                <button onclick="runWebEnrichmentOnly(${preview.inspection_id})" id="btn-web-enrich"
+                                    class="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                                    ${preview.existingWebsite ? 'disabled title="Already has website"' : ''}>
                                     <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
                                     </svg>
-                                    Search with Apollo
+                                    Web Scrape (Free)
+                                </button>
+                            </div>
+
+                            <!-- Bottom row: Apollo button -->
+                            <div class="flex justify-end">
+                                <button onclick="runApolloEnrichmentOnly(${preview.inspection_id})" id="btn-apollo-enrich"
+                                    class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 ${preview.recommendation === 'do_not_enrich' && !preview.existingDomain ? 'opacity-50' : ''}"
+                                    ${preview.recommendation === 'do_not_enrich' && !preview.existingDomain ? 'disabled title="Run web scraping first to find domain"' : ''}>
+                                    <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                                    </svg>
+                                    Apollo Search (${preview.estimated_credits} credit${preview.estimated_credits !== 1 ? 's' : ''})
                                 </button>
                             </div>
                         </div>
@@ -1679,6 +1701,7 @@ async def osha_dashboard():
             const existingDomain = currentEnrichmentPreview?.existingDomain;
             const existingWebsite = currentEnrichmentPreview?.existingWebsite;
             let domainForApollo = null;
+            let webEnrichmentComplete = false;
 
             if (existingDomain || existingWebsite) {
                 // Use existing domain - skip web search
@@ -1705,6 +1728,7 @@ async def osha_dashboard():
                 } else {
                     domainForApollo = existingDomain;
                 }
+                webEnrichmentComplete = true;
             } else {
                 // Step 1: Web search to find domain
                 btn.innerHTML = `
@@ -1715,13 +1739,31 @@ async def osha_dashboard():
                     Step 1: Finding website...
                 `;
 
+                // Show searching status
+                webResultContainer.classList.remove('hidden');
+                webResultContainer.innerHTML = `
+                    <div class="bg-blue-50 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg class="w-5 h-5 text-blue-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <h3 class="font-medium text-blue-900">Searching for company website...</h3>
+                        </div>
+                        <p class="text-sm text-blue-700">This may take 30-60 seconds (searches DuckDuckGo, LinkedIn, etc.)</p>
+                    </div>
+                `;
+
                 try {
-                    // Run web enrichment first
-                    const webResult = await fetch(`/api/enrichment/web-enrich/${inspectionId}`, { method: 'POST' }).then(r => r.json());
+                    // Run web enrichment first - this MUST complete before Apollo
+                    console.log('Starting web enrichment for inspection', inspectionId);
+                    const webResponse = await fetch(`/api/enrichment/web-enrich/${inspectionId}`, { method: 'POST' });
+                    const webResult = await webResponse.json();
+                    console.log('Web enrichment complete:', webResult);
                     currentWebEnrichmentResult = webResult;
+                    webEnrichmentComplete = true;
 
                     // Show web search results
-                    webResultContainer.classList.remove('hidden');
                     if (webResult.website_url) {
                         webResultContainer.innerHTML = `
                             <div class="bg-green-50 rounded-lg p-4">
@@ -1732,10 +1774,12 @@ async def osha_dashboard():
                                     <h3 class="font-medium text-green-900">Website Found</h3>
                                 </div>
                                 <p class="text-sm"><a href="${webResult.website_url}" target="_blank" class="text-blue-600 hover:underline">${escapeHtml(webResult.website_url)}</a></p>
+                                ${webResult.confidence ? `<p class="text-xs text-green-600 mt-1">Confidence: ${webResult.confidence}</p>` : ''}
                             </div>
                         `;
                         try {
                             domainForApollo = new URL(webResult.website_url).hostname.replace('www.', '');
+                            console.log('Extracted domain for Apollo:', domainForApollo);
                         } catch (e) {
                             console.warn('Could not parse website URL for domain:', e);
                         }
@@ -1749,21 +1793,44 @@ async def osha_dashboard():
                                     <h3 class="font-medium text-yellow-900">No Website Found</h3>
                                 </div>
                                 <p class="text-sm text-yellow-700">Will search Apollo by company name (less accurate)</p>
+                                ${webResult.error ? `<p class="text-xs text-yellow-600 mt-1">${escapeHtml(webResult.error)}</p>` : ''}
                             </div>
                         `;
                     }
                 } catch (e) {
                     console.error('Web enrichment error:', e);
+                    webResultContainer.innerHTML = `
+                        <div class="bg-red-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                <h3 class="font-medium text-red-900">Web Search Failed</h3>
+                            </div>
+                            <p class="text-sm text-red-700">${escapeHtml(e.message || 'Unknown error')}</p>
+                            <p class="text-sm text-red-600 mt-1">Proceeding with Apollo name search...</p>
+                        </div>
+                    `;
+                    webEnrichmentComplete = true; // Still proceed but without domain
                 }
             }
 
             // Step 2: Apollo search using domain if found
+            // Only proceed if web enrichment is complete
+            if (!webEnrichmentComplete) {
+                console.error('Web enrichment not complete, cannot proceed to Apollo');
+                btn.innerHTML = 'Error - Retry';
+                btn.disabled = false;
+                return;
+            }
+
+            console.log('Proceeding to Apollo search with domain:', domainForApollo);
             btn.innerHTML = `
                 <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                 </svg>
-                Searching Apollo...
+                Step 2: Searching Apollo...
             `;
 
             try {
@@ -1809,7 +1876,7 @@ async def osha_dashboard():
                                             Select All
                                         </label>
                                     </div>
-                                    <p class="text-xs text-gray-500 mb-2">Select contacts to reveal their email/phone (1 credit per contact)</p>
+                                    <p class="text-xs text-gray-500 mb-2">Select contacts to reveal their info (1 credit per contact)</p>
                                     <div class="space-y-2 max-h-48 overflow-y-auto">
                                         ${allContacts.map((c, idx) => {
                                             const isSafety = (people?.safety_contacts || []).includes(c);
@@ -1825,10 +1892,25 @@ async def osha_dashboard():
                                             </label>
                                         `}).join('')}
                                     </div>
+                                    <!-- Reveal options -->
+                                    <div class="mt-3 p-3 bg-gray-50 rounded-lg border">
+                                        <p class="text-xs font-medium text-gray-700 mb-2">What to reveal:</p>
+                                        <div class="flex gap-4">
+                                            <label class="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input type="checkbox" id="reveal-email-option" checked class="rounded" onchange="updateRevealButtonState()">
+                                                <span>Email</span>
+                                            </label>
+                                            <label class="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input type="checkbox" id="reveal-phone-option" class="rounded" onchange="updateRevealButtonState()">
+                                                <span>Phone</span>
+                                                <span class="text-xs text-yellow-600">(requires webhook)</span>
+                                            </label>
+                                        </div>
+                                    </div>
                                     <button id="reveal-contacts-btn" onclick="revealSelectedContacts(${inspectionId})"
                                         class="w-full mt-3 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
                                         disabled>
-                                        Reveal Email/Phone for Selected (0 credits)
+                                        Reveal for Selected (0 credits)
                                     </button>
                                 </div>
                             ` : '<p class="text-sm text-gray-500 mb-4">No contacts found at this company</p>'}
@@ -1881,19 +1963,37 @@ async def osha_dashboard():
         function updateRevealButtonState() {
             const checkboxes = document.querySelectorAll('.contact-checkbox:checked');
             const btn = document.getElementById('reveal-contacts-btn');
+            const revealEmail = document.getElementById('reveal-email-option')?.checked ?? true;
+            const revealPhone = document.getElementById('reveal-phone-option')?.checked ?? false;
+
             if (btn) {
                 const count = checkboxes.length;
-                btn.disabled = count === 0;
-                btn.textContent = `Reveal Email/Phone for Selected (${count} credit${count !== 1 ? 's' : ''})`;
+                const hasSelection = count > 0 && (revealEmail || revealPhone);
+
+                // Build label showing what will be revealed
+                let revealTypes = [];
+                if (revealEmail) revealTypes.push('Email');
+                if (revealPhone) revealTypes.push('Phone');
+                const typeLabel = revealTypes.length > 0 ? revealTypes.join(' + ') : 'Nothing';
+
+                btn.disabled = !hasSelection;
+                btn.textContent = `Reveal ${typeLabel} for ${count} Contact${count !== 1 ? 's' : ''} (${count} credit${count !== 1 ? 's' : ''})`;
             }
         }
 
         async function revealSelectedContacts(inspectionId) {
             const checkboxes = document.querySelectorAll('.contact-checkbox:checked');
             const personIds = Array.from(checkboxes).map(cb => cb.value).filter(id => id);
+            const revealEmail = document.getElementById('reveal-email-option')?.checked ?? true;
+            const revealPhone = document.getElementById('reveal-phone-option')?.checked ?? false;
 
             if (personIds.length === 0) {
                 alert('Please select at least one contact to reveal');
+                return;
+            }
+
+            if (!revealEmail && !revealPhone) {
+                alert('Please select at least Email or Phone to reveal');
                 return;
             }
 
@@ -1911,22 +2011,28 @@ async def osha_dashboard():
                 const response = await fetch('/api/enrichment/reveal-contacts', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ person_ids: personIds })
+                    body: JSON.stringify({
+                        person_ids: personIds,
+                        reveal_email: revealEmail,
+                        reveal_phone: revealPhone
+                    })
                 });
 
                 const result = await response.json();
 
                 if (result.success && result.contacts.length > 0) {
-                    revealedContacts = result.contacts;
+                    // Append to existing revealed contacts (don't overwrite)
+                    revealedContacts = [...revealedContacts, ...result.contacts];
 
-                    // Show revealed contacts
+                    // Show ALL revealed contacts (accumulated from multiple reveals)
                     const container = document.getElementById('revealed-contacts-container');
                     container.classList.remove('hidden');
                     container.innerHTML = `
                         <div class="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <h4 class="font-medium text-green-900 mb-2">Revealed Contacts (${result.credits_used} credits used)</h4>
-                            <div class="space-y-2">
-                                ${result.contacts.map(c => `
+                            <h4 class="font-medium text-green-900 mb-2">Revealed Contacts (${revealedContacts.length} total, ${result.credits_used} credits just used)</h4>
+                            <p class="text-xs text-green-700 mb-2">These will be saved when you click "Save Company to Database"</p>
+                            <div class="space-y-2 max-h-48 overflow-y-auto">
+                                ${revealedContacts.map(c => `
                                     <div class="bg-white rounded border p-2 text-sm">
                                         <div class="font-medium">${escapeHtml(c.full_name || 'Unknown')}</div>
                                         <div class="text-gray-600">${escapeHtml(c.title || '')}</div>
@@ -1938,22 +2044,28 @@ async def osha_dashboard():
                         </div>
                     `;
 
-                    btn.textContent = `${result.contacts.length} Contact${result.contacts.length !== 1 ? 's' : ''} Revealed`;
+                    btn.textContent = `${revealedContacts.length} Contact${revealedContacts.length !== 1 ? 's' : ''} Revealed`;
                     btn.classList.remove('bg-orange-500', 'hover:bg-orange-600');
                     btn.classList.add('bg-green-500');
 
-                    // Uncheck revealed contacts
+                    // Uncheck revealed contacts and re-enable button for more reveals
                     checkboxes.forEach(cb => cb.checked = false);
+                    btn.disabled = false;
+                    setTimeout(() => {
+                        btn.classList.remove('bg-green-500');
+                        btn.classList.add('bg-orange-500', 'hover:bg-orange-600');
+                        updateRevealButtonState();
+                    }, 1500);
                 } else {
                     alert(result.error || 'Failed to reveal contacts');
                     btn.disabled = false;
-                    btn.textContent = 'Reveal Email/Phone for Selected (0 credits)';
+                    updateRevealButtonState();
                 }
             } catch (e) {
                 console.error('Error revealing contacts:', e);
                 alert('Error revealing contacts: ' + e.message);
                 btn.disabled = false;
-                btn.textContent = 'Reveal Email/Phone for Selected (0 credits)';
+                updateRevealButtonState();
             }
         }
 
@@ -1987,6 +2099,8 @@ async def osha_dashboard():
 
                 // Merge revealed contact data (email/phone) into the original contacts
                 if (revealedContacts.length > 0) {
+                    const contactIds = new Set(contacts.map(c => c.apollo_person_id));
+
                     contacts = contacts.map(contact => {
                         // Find if this contact was revealed
                         const revealed = revealedContacts.find(r => r.apollo_person_id === contact.apollo_person_id);
@@ -2002,6 +2116,14 @@ async def osha_dashboard():
                         }
                         return contact;
                     });
+
+                    // Add any revealed contacts that weren't in the original list
+                    for (const revealed of revealedContacts) {
+                        if (revealed.apollo_person_id && !contactIds.has(revealed.apollo_person_id)) {
+                            contacts.push(revealed);
+                            console.log('Added revealed contact not in original list:', revealed.full_name);
+                        }
+                    }
                 }
 
                 console.log('Sending to API:', { organization: currentApolloResult.organization, contacts, revealedCount: revealedContacts.length });
@@ -2019,6 +2141,9 @@ async def osha_dashboard():
 
                 if (result.company_saved) {
                     const isReEnrich = currentEnrichmentPreview?.isReEnrich;
+                    // Save organization data BEFORE closing modal (which sets currentApolloResult to null)
+                    const savedOrganization = currentApolloResult?.organization;
+
                     alert(`${isReEnrich ? 'Updated' : 'Saved'} successfully! Company: ${result.company_data?.name}, Contacts: ${result.contacts_saved}`);
                     closeEnrichmentPreviewModal();
 
@@ -2032,11 +2157,13 @@ async def osha_dashboard():
                     }
 
                     // Display the company data in the modal (if inspection modal is open)
-                    displayCompanyData(inspectionId, {
-                        success: true,
-                        data: currentApolloResult.organization,
-                        confidence: 'high'
-                    });
+                    if (savedOrganization) {
+                        displayCompanyData(inspectionId, {
+                            success: true,
+                            data: savedOrganization,
+                            confidence: 'high'
+                        });
+                    }
 
                     // Reload enriched companies list if it was a re-enrich
                     if (isReEnrich) {
@@ -2060,6 +2187,341 @@ async def osha_dashboard():
                     saveBtn.disabled = false;
                     saveBtn.textContent = 'Confirm & Save to Database';
                 }
+            }
+        }
+
+        // Run web enrichment only (free) - finds website, scrapes data, saves to database
+        async function runWebEnrichmentOnly(inspectionId) {
+            const btn = document.getElementById('btn-web-enrich');
+            const resultContainer = document.getElementById('web-enrichment-result-actions');
+
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Searching...
+            `;
+
+            // Show searching status
+            resultContainer.classList.remove('hidden');
+            resultContainer.innerHTML = `
+                <div class="bg-blue-50 rounded-lg p-4">
+                    <div class="flex items-center gap-2 mb-2">
+                        <svg class="w-5 h-5 text-blue-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <h3 class="font-medium text-blue-900">Searching for company information...</h3>
+                    </div>
+                    <p class="text-sm text-blue-700">This may take 30-60 seconds (searches DuckDuckGo, LinkedIn, Secretary of State, etc.)</p>
+                    <p class="text-xs text-blue-600 mt-1">Looking for DBA names, alternate company names, and official website...</p>
+                </div>
+            `;
+
+            try {
+                // Run FULL web enrichment (not quick mode)
+                const response = await fetch(`/api/enrichment/web-enrich/${inspectionId}?quick=false`, { method: 'POST' });
+                const webResult = await response.json();
+                console.log('Web enrichment result:', webResult);
+                currentWebEnrichmentResult = webResult;
+
+                if (webResult.success || webResult.website_url) {
+                    // Show the extracted data with option to edit and save
+                    const data = webResult.data || {};
+                    resultContainer.innerHTML = `
+                        <div class="bg-green-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-3">
+                                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <h3 class="font-medium text-green-900">Web Scraping Complete</h3>
+                                ${webResult.confidence ? `<span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">${webResult.confidence} confidence</span>` : ''}
+                            </div>
+
+                            <div class="space-y-2 text-sm mb-4">
+                                ${data.legal_name || data.official_name ? `<p><strong>Legal Name:</strong> ${escapeHtml(data.legal_name || data.official_name)}</p>` : ''}
+                                ${data.operating_name || data.dba_name ? `<p><strong>DBA/Operating Name:</strong> ${escapeHtml(data.operating_name || data.dba_name)}</p>` : ''}
+                                ${webResult.website_url ? `<p><strong>Website:</strong> <a href="${webResult.website_url}" target="_blank" class="text-blue-600 hover:underline">${escapeHtml(webResult.website_url)}</a></p>` : ''}
+                                ${data.phone || data.contact_info?.main_phone ? `<p><strong>Phone:</strong> ${escapeHtml(data.phone || data.contact_info?.main_phone)}</p>` : ''}
+                                ${data.email || data.contact_info?.main_email ? `<p><strong>Email:</strong> ${escapeHtml(data.email || data.contact_info?.main_email)}</p>` : ''}
+                                ${data.industry ? `<p><strong>Industry:</strong> ${escapeHtml(data.industry)}</p>` : ''}
+                                ${data.employee_estimate ? `<p><strong>Employees:</strong> ${escapeHtml(data.employee_estimate)}</p>` : ''}
+                                ${data.year_established ? `<p><strong>Est.:</strong> ${escapeHtml(data.year_established)}</p>` : ''}
+                                ${data.description ? `<p class="text-gray-600 text-xs mt-2">${escapeHtml(data.description.substring(0, 200))}${data.description.length > 200 ? '...' : ''}</p>` : ''}
+                            </div>
+
+                            ${data.key_personnel && data.key_personnel.length > 0 ? `
+                                <div class="border-t border-green-200 pt-3 mb-4">
+                                    <p class="font-medium text-green-900 mb-2">Key Personnel Found (${data.key_personnel.length}):</p>
+                                    <div class="space-y-1 text-xs max-h-32 overflow-y-auto">
+                                        ${data.key_personnel.map(p => `
+                                            <div class="bg-white rounded border p-1.5">
+                                                <span class="font-medium">${escapeHtml(p.name || 'Unknown')}</span>
+                                                ${p.title ? `<span class="text-gray-500"> - ${escapeHtml(p.title)}</span>` : ''}
+                                                ${p.email ? `<span class="text-blue-600 ml-2">${escapeHtml(p.email)}</span>` : ''}
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            <div class="flex gap-2">
+                                <button onclick="saveWebEnrichmentData(${inspectionId})"
+                                    class="flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700">
+                                    Save to Database
+                                </button>
+                                <button onclick="runApolloEnrichmentOnly(${inspectionId})"
+                                    class="flex-1 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                                    ${webResult.website_url ? '' : 'disabled title="No website found"'}>
+                                    Continue with Apollo
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    // Enable Apollo button now that we have data
+                    const apolloBtn = document.getElementById('btn-apollo-enrich');
+                    if (apolloBtn && webResult.website_url) {
+                        apolloBtn.disabled = false;
+                        apolloBtn.classList.remove('opacity-50');
+                    }
+
+                    btn.innerHTML = 'Scraping Complete';
+                    btn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                    btn.classList.add('bg-gray-400');
+                } else {
+                    resultContainer.innerHTML = `
+                        <div class="bg-yellow-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                </svg>
+                                <h3 class="font-medium text-yellow-900">Limited Results</h3>
+                            </div>
+                            <p class="text-sm text-yellow-700">${webResult.error || 'No website or company data found'}</p>
+                            <p class="text-sm text-yellow-600 mt-1">Try Apollo search to find company by name</p>
+                        </div>
+                    `;
+                    btn.innerHTML = 'Try Again';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                console.error('Web enrichment error:', e);
+                resultContainer.innerHTML = `
+                    <div class="bg-red-50 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                            <h3 class="font-medium text-red-900">Web Scraping Failed</h3>
+                        </div>
+                        <p class="text-sm text-red-700">${escapeHtml(e.message || 'Unknown error')}</p>
+                    </div>
+                `;
+                btn.innerHTML = 'Retry';
+                btn.disabled = false;
+            }
+        }
+
+        // Save web enrichment data to database
+        async function saveWebEnrichmentData(inspectionId) {
+            if (!currentWebEnrichmentResult) {
+                alert('No web enrichment data to save');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/enrichment/save-web-enrichment/${inspectionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data: currentWebEnrichmentResult.data || {},
+                        website_url: currentWebEnrichmentResult.website_url,
+                        confidence: currentWebEnrichmentResult.confidence || 'medium'
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`Saved successfully! Company: ${result.company_name || 'Unknown'}, Contacts: ${result.contacts_saved || 0}`);
+                    closeEnrichmentPreviewModal();
+
+                    // Update button in inspection list
+                    const enrichBtn = document.getElementById(`enrich-btn-${inspectionId}`);
+                    if (enrichBtn) {
+                        enrichBtn.classList.remove('bg-blue-100', 'text-blue-700');
+                        enrichBtn.classList.add('bg-green-100', 'text-green-700');
+                        enrichBtn.innerHTML = 'Enriched (Web)';
+                    }
+                } else {
+                    alert(`Error saving: ${result.error}`);
+                }
+            } catch (e) {
+                console.error('Error saving web enrichment:', e);
+                alert('Error saving: ' + e.message);
+            }
+        }
+
+        // Run Apollo enrichment only (uses credits)
+        async function runApolloEnrichmentOnly(inspectionId) {
+            const btn = document.getElementById('btn-apollo-enrich');
+            const apolloResultContainer = document.getElementById('apollo-result');
+
+            // Check if we have a domain from web enrichment
+            let domainForApollo = null;
+            if (currentWebEnrichmentResult?.website_url) {
+                try {
+                    domainForApollo = new URL(currentWebEnrichmentResult.website_url).hostname.replace('www.', '');
+                } catch (e) {}
+            } else if (currentEnrichmentPreview?.existingWebsite) {
+                try {
+                    domainForApollo = new URL(currentEnrichmentPreview.existingWebsite).hostname.replace('www.', '');
+                } catch (e) {}
+            } else if (currentEnrichmentPreview?.existingDomain) {
+                domainForApollo = currentEnrichmentPreview.existingDomain;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = `
+                <svg class="w-4 h-4 mr-1 animate-spin inline" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Searching Apollo...
+            `;
+
+            try {
+                let apolloUrl = `/api/enrichment/apollo-search/${inspectionId}`;
+                if (domainForApollo) {
+                    apolloUrl += `?domain=${encodeURIComponent(domainForApollo)}`;
+                }
+
+                const apolloResult = await fetch(apolloUrl, { method: 'POST' }).then(r => r.json());
+                currentApolloResult = apolloResult;
+
+                // Show Apollo results
+                apolloResultContainer.classList.remove('hidden');
+
+                if (apolloResult.success && apolloResult.organization) {
+                    const org = apolloResult.organization;
+                    const people = apolloResult.people;
+                    const allContacts = [...(people?.safety_contacts || []), ...(people?.executive_contacts || [])];
+
+                    apolloResultContainer.innerHTML = `
+                        <div class="bg-indigo-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-3">
+                                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <h3 class="font-medium text-indigo-900">Apollo Match Found</h3>
+                                <span class="text-xs text-indigo-600">(${apolloResult.credits_used} credits used)</span>
+                            </div>
+                            <div class="text-sm space-y-2 mb-4">
+                                <p><strong>Company:</strong> ${escapeHtml(org.name || 'Unknown')}</p>
+                                ${org.domain ? `<p><strong>Domain:</strong> ${escapeHtml(org.domain)}</p>` : ''}
+                                ${org.industry ? `<p><strong>Industry:</strong> ${escapeHtml(org.industry)}</p>` : ''}
+                                ${org.employee_range ? `<p><strong>Employees:</strong> ${escapeHtml(org.employee_range)}</p>` : ''}
+                                ${org.phone ? `<p><strong>Phone:</strong> ${escapeHtml(org.phone)}</p>` : ''}
+                                ${org.city && org.state ? `<p><strong>Location:</strong> ${escapeHtml(org.city)}, ${escapeHtml(org.state)}</p>` : ''}
+                            </div>
+                            ${allContacts.length ? `
+                                <div class="border-t border-indigo-200 pt-3 mb-4">
+                                    <div class="flex justify-between items-center mb-2">
+                                        <p class="font-medium text-indigo-900">Contacts Found (${allContacts.length}):</p>
+                                        <label class="flex items-center gap-1 text-xs text-indigo-700 cursor-pointer">
+                                            <input type="checkbox" id="select-all-contacts" onchange="toggleAllContacts(this.checked)" class="rounded">
+                                            Select All
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-500 mb-2">Select contacts to reveal their info (1 credit per contact)</p>
+                                    <div class="space-y-2 max-h-48 overflow-y-auto">
+                                        ${allContacts.map((c, idx) => {
+                                            const isSafety = (people?.safety_contacts || []).includes(c);
+                                            return `
+                                            <label class="flex items-center gap-2 p-2 bg-white rounded border hover:bg-gray-50 cursor-pointer">
+                                                <input type="checkbox" class="contact-checkbox rounded" value="${escapeHtml(c.apollo_person_id || '')}" data-idx="${idx}">
+                                                <span class="px-1.5 py-0.5 ${isSafety ? 'bg-green-100 text-green-800' : 'bg-purple-100 text-purple-800'} text-xs rounded">${isSafety ? 'Safety' : 'Exec'}</span>
+                                                <div class="flex-1 min-w-0">
+                                                    <div class="font-medium text-sm truncate">${escapeHtml(c.full_name || 'Unknown')}</div>
+                                                    <div class="text-xs text-gray-500 truncate">${escapeHtml(c.title || 'No title')}</div>
+                                                </div>
+                                                ${c.email ? '<span class="text-xs text-green-600">Has email</span>' : '<span class="text-xs text-gray-400">No email yet</span>'}
+                                            </label>
+                                        `}).join('')}
+                                    </div>
+                                    <!-- Reveal options -->
+                                    <div class="mt-3 p-3 bg-gray-50 rounded-lg border">
+                                        <p class="text-xs font-medium text-gray-700 mb-2">What to reveal:</p>
+                                        <div class="flex gap-4">
+                                            <label class="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input type="checkbox" id="reveal-email-option" checked class="rounded" onchange="updateRevealButtonState()">
+                                                <span>Email</span>
+                                            </label>
+                                            <label class="flex items-center gap-2 text-sm cursor-pointer">
+                                                <input type="checkbox" id="reveal-phone-option" class="rounded" onchange="updateRevealButtonState()">
+                                                <span>Phone</span>
+                                                <span class="text-xs text-yellow-600">(requires webhook)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <button id="reveal-contacts-btn" onclick="revealSelectedContacts(${inspectionId})"
+                                        class="w-full mt-3 px-4 py-2 text-sm font-medium text-white bg-orange-500 rounded-md hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled>
+                                        Reveal for Selected (0 credits)
+                                    </button>
+                                </div>
+                            ` : '<p class="text-sm text-gray-500 mb-4">No contacts found at this company</p>'}
+                            <div id="revealed-contacts-container" class="hidden mb-4"></div>
+                            <button id="confirm-save-btn" onclick="confirmAndSaveEnrichment(${inspectionId})"
+                                class="w-full px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700">
+                                Save Company to Database
+                            </button>
+                        </div>
+                    `;
+
+                    // Add event listeners for checkbox changes
+                    document.querySelectorAll('.contact-checkbox').forEach(cb => {
+                        cb.addEventListener('change', updateRevealButtonState);
+                    });
+
+                    btn.innerHTML = 'Search Complete';
+                    btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+                    btn.classList.add('bg-green-600');
+                } else {
+                    apolloResultContainer.innerHTML = `
+                        <div class="bg-red-50 rounded-lg p-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                <h3 class="font-medium text-red-900">No Apollo Match</h3>
+                            </div>
+                            <p class="text-sm text-red-700">${apolloResult.error || 'No organization found in Apollo'}</p>
+                            <p class="text-xs text-red-500 mt-1">Credits used: ${apolloResult.credits_used}</p>
+                        </div>
+                    `;
+                    btn.innerHTML = 'No Results - Try Again';
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                console.error('Apollo search error:', e);
+                apolloResultContainer.classList.remove('hidden');
+                apolloResultContainer.innerHTML = `
+                    <div class="bg-red-50 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                            <h3 class="font-medium text-red-900">Apollo Search Failed</h3>
+                        </div>
+                        <p class="text-sm text-red-700">${escapeHtml(e.message || 'Unknown error')}</p>
+                    </div>
+                `;
+                btn.innerHTML = 'Error - Retry';
+                btn.disabled = false;
             }
         }
 
@@ -2491,11 +2953,6 @@ async def osha_dashboard():
                                     title="Add to CRM">
                                     + CRM
                                 </button>
-                                <button onclick="reEnrichWithApollo(${company.inspection_id}, ${company.id})"
-                                    class="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
-                                    title="Re-enrich with Apollo API">
-                                    Apollo
-                                </button>
                             </div>
                         </td>
                     </tr>
@@ -2641,30 +3098,54 @@ async def osha_dashboard():
                 ` : ''}
 
                 <!-- Key Personnel -->
-                ${contacts && contacts.length > 0 ? `
+                ${contacts && contacts.length > 0 ? (() => {
+                    // Sort contacts: those with email/phone first, then others
+                    const withContact = contacts.filter(p => p.email || p.phone);
+                    const withoutContact = contacts.filter(p => !p.email && !p.phone);
+
+                    const renderContact = (p, highlighted = false) => `
+                        <div class="${highlighted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'} rounded-lg p-3 border">
+                            <div class="flex items-start justify-between">
+                                <div>
+                                    <p class="text-sm font-semibold">${escapeHtml(p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' '))}</p>
+                                    ${p.title ? `<p class="text-xs text-gray-500">${escapeHtml(p.title)}</p>` : ''}
+                                </div>
+                                ${p.linkedin_url ? `<a href="${p.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg></a>` : ''}
+                            </div>
+                            ${(p.email || p.phone) ? `
+                                <div class="mt-2 flex flex-wrap gap-3 text-xs">
+                                    ${p.email ? `<a href="mailto:${escapeHtml(p.email)}" class="text-blue-600 hover:text-blue-800">${escapeHtml(p.email)}</a>` : ''}
+                                    ${p.phone ? `<a href="tel:${escapeHtml(p.phone)}" class="text-blue-600 hover:text-blue-800">${escapeHtml(p.phone)}</a>` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+
+                    return `
                     <div class="border-t pt-4 mb-6">
                         <p class="text-xs text-gray-500 uppercase mb-3">Key Personnel</p>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            ${contacts.map(p => `
-                                <div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                                    <div class="flex items-start justify-between">
-                                        <div>
-                                            <p class="text-sm font-semibold">${escapeHtml(p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' '))}</p>
-                                            ${p.title ? `<p class="text-xs text-gray-500">${escapeHtml(p.title)}</p>` : ''}
-                                        </div>
-                                        ${p.linkedin_url ? `<a href="${p.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg></a>` : ''}
-                                    </div>
-                                    ${(p.email || p.phone) ? `
-                                        <div class="mt-2 flex flex-wrap gap-3 text-xs">
-                                            ${p.email ? `<a href="mailto:${escapeHtml(p.email)}" class="text-blue-600 hover:text-blue-800">${escapeHtml(p.email)}</a>` : ''}
-                                            ${p.phone ? `<a href="tel:${escapeHtml(p.phone)}" class="text-blue-600 hover:text-blue-800">${escapeHtml(p.phone)}</a>` : ''}
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            `).join('')}
-                        </div>
+                        ${withContact.length > 0 ? `
+                            <p class="text-xs font-medium text-green-700 mb-2 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                </svg>
+                                Contacts with Email/Phone (${withContact.length})
+                            </p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                                ${withContact.map(p => renderContact(p, true)).join('')}
+                            </div>
+                        ` : ''}
+                        ${withoutContact.length > 0 ? `
+                            <p class="text-xs font-medium text-gray-500 mb-2 ${withContact.length > 0 ? 'mt-4 pt-3 border-t' : ''}">
+                                Other Personnel (${withoutContact.length})
+                            </p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                ${withoutContact.map(p => renderContact(p, false)).join('')}
+                            </div>
+                        ` : ''}
                     </div>
-                ` : ''}
+                    `;
+                })() : ''}
             `;
         }
 
@@ -2693,7 +3174,7 @@ async def osha_dashboard():
                         const countEl = document.getElementById('enriched-count');
                         if (countEl) {
                             const currentText = countEl.textContent;
-                            const match = currentText.match(/\((\d+)/);
+                            const match = currentText.match(/\\((\\d+)/);
                             if (match) {
                                 const newCount = parseInt(match[1]) - 1;
                                 countEl.textContent = `(${newCount} companies)`;

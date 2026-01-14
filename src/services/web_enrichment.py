@@ -84,6 +84,93 @@ class WebEnrichmentService:
 
         return None
 
+    async def find_dba_names(self, company_name: str, city: str = None, state: str = None) -> List[str]:
+        """
+        Search for DBA (Doing Business As) names, parent companies, and trade names.
+        This helps find companies that operate under different names than their legal name.
+        """
+        dba_names = []
+
+        # Search queries specifically for DBA/parent company info
+        search_queries = [
+            f'"{company_name}" "doing business as"',
+            f'"{company_name}" "also known as"',
+            f'"{company_name}" "dba"',
+            f'"{company_name}" "parent company"',
+            f'"{company_name}" "subsidiary of"',
+            f'"{company_name}" "owned by"',
+        ]
+
+        if state:
+            search_queries.append(f'"{company_name}" {state} business registration')
+
+        all_urls = []
+        for query in search_queries[:3]:  # Limit to avoid too many requests
+            urls = await self._duckduckgo_search(query, num_results=3)
+            all_urls.extend(urls)
+
+        # Fetch content and use OpenAI to extract DBA names
+        if all_urls and self.openai_client:
+            # Get first relevant result
+            content_pieces = []
+            for url in all_urls[:2]:
+                content = await self._fetch_with_jina(url, max_chars=5000)
+                if content:
+                    content_pieces.append(content)
+
+            if content_pieces:
+                combined = "\n\n---\n\n".join(content_pieces)
+                dba_prompt = f"""Analyze the following web content about "{company_name}".
+
+Your task: Find any alternate names this company operates under.
+
+Look for:
+1. "Doing Business As" (DBA) names
+2. Trade names or brand names
+3. Parent company names (if this is a subsidiary)
+4. Former company names
+5. Any other names the company is known by
+
+Return ONLY a JSON array of alternate names found. If none found, return empty array.
+Example: ["Ole Mexican Foods", "Good Harvest LLC"]
+
+IMPORTANT:
+- Only include names that are clearly associated with "{company_name}"
+- Do NOT include unrelated company names
+- Do NOT make up names - only include what's explicitly mentioned
+- Return just the JSON array, no other text
+
+Content:
+{combined}"""
+
+                try:
+                    response = self.openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "You extract company names from text. Return only valid JSON arrays."},
+                            {"role": "user", "content": dba_prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=500
+                    )
+                    result_text = response.choices[0].message.content.strip()
+
+                    # Clean up response
+                    if result_text.startswith("```"):
+                        result_text = result_text.split("```")[1]
+                        if result_text.startswith("json"):
+                            result_text = result_text[4:]
+                    result_text = result_text.strip()
+
+                    names = json.loads(result_text)
+                    if isinstance(names, list):
+                        dba_names = [n for n in names if n and isinstance(n, str)]
+                        logger.info(f"Found DBA names for {company_name}: {dba_names}")
+                except Exception as e:
+                    logger.error(f"Error finding DBA names: {e}")
+
+        return dba_names
+
     async def search_linkedin_profile(self, company_name: str, state: str = None) -> Optional[str]:
         """Find company's LinkedIn page."""
         query = f"site:linkedin.com/company {company_name}"
@@ -205,6 +292,7 @@ class WebEnrichmentService:
         Full multi-source enrichment pipeline.
 
         Searches:
+        0. DBA/alternate name search - find if company operates under different name
         1. Company website - for basic info, services, contact
         2. LinkedIn company page - for company details, employee count
         3. Facebook page - for social presence, reviews
@@ -217,15 +305,31 @@ class WebEnrichmentService:
             "data": None,
             "error": None,
             "sources_searched": [],
-            "confidence": "low"
+            "confidence": "low",
+            "dba_names_found": []
         }
 
         all_content = []
         has_verified_source = False  # Track if we have a high-confidence source
+        search_names = [company_name]  # Names to search for
 
-        # 1. Find and fetch company website
         logger.info(f"Starting enrichment for: {company_name}, {city}, {state}")
-        website_url = await self.search_company_website(company_name, city, state)
+
+        # 0. First, search for DBA/alternate names
+        dba_names = await self.find_dba_names(company_name, city, state)
+        if dba_names:
+            result["dba_names_found"] = dba_names
+            search_names.extend(dba_names)
+            logger.info(f"Will also search for DBA names: {dba_names}")
+
+        # 1. Find and fetch company website (try original name first, then DBAs)
+        website_url = None
+        for name in search_names:
+            website_url = await self.search_company_website(name, city, state)
+            if website_url:
+                logger.info(f"Found website using name '{name}': {website_url}")
+                break
+
         if website_url:
             result["website_url"] = website_url
             result["sources_searched"].append(("website", website_url))
@@ -234,8 +338,12 @@ class WebEnrichmentService:
                 all_content.append(f"=== COMPANY WEBSITE ({website_url}) ===\n{content}")
                 has_verified_source = True
 
-        # 2. Find LinkedIn company page
-        linkedin_url = await self.search_linkedin_profile(company_name, state)
+        # 2. Find LinkedIn company page (try all names)
+        linkedin_url = None
+        for name in search_names:
+            linkedin_url = await self.search_linkedin_profile(name, state)
+            if linkedin_url:
+                break
         if linkedin_url:
             result["sources_searched"].append(("linkedin", linkedin_url))
             content = await self._fetch_with_jina(linkedin_url, max_chars=8000)
@@ -291,34 +399,49 @@ class WebEnrichmentService:
         elif city:
             location_context = f"in or near {city}"
 
+        # Include DBA names found in prompt context
+        dba_context = ""
+        if result.get("dba_names_found"):
+            dba_context = f"\nKNOWN ALTERNATE NAMES: {', '.join(result['dba_names_found'])}"
+
         # Extract comprehensive company data with VERIFICATION
-        extraction_prompt = f"""You are verifying and extracting data about a specific company.
+        extraction_prompt = f"""You are a business intelligence analyst extracting company data from web sources.
 
 TARGET COMPANY: "{company_name}"
-EXPECTED LOCATION: {location_context if location_context else "unknown"}
+EXPECTED LOCATION: {location_context if location_context else "unknown"}{dba_context}
 
-CRITICAL VERIFICATION STEP:
-First, determine if the content below is ACTUALLY about the target company "{company_name}" {location_context}.
-Look for these verification signals:
-- Company name matches (exact or very close match)
-- Location matches (same city/state or nearby)
-- Industry/business type seems consistent
+CRITICAL: UNDERSTANDING DBA (DOING BUSINESS AS) RELATIONSHIPS
+Many companies operate under names DIFFERENT from their legal/registered name:
+- "GOOD HARVEST GRAINS" might do business as "Ole Mexican Foods"
+- A legal entity name like "ABC Holdings LLC" might operate stores as "Joe's Pizza"
+- Parent companies often own subsidiaries with completely different names
 
-If the content appears to be about a DIFFERENT company (wrong name, wrong location, different business entirely), set "is_verified_match" to false.
+Your verification should consider:
+1. The company might be found under a DBA/trade name, not its legal name
+2. The location MUST match (same city/state or very close)
+3. Industry/business type should be consistent
+4. Look for phrases like "doing business as", "d/b/a", "operating as", "also known as"
+
+If you find content about the company under a DIFFERENT operating name but at the CORRECT location, this IS a verified match - just note the relationship.
 
 Extract information into this JSON structure:
 
 {{
     "is_verified_match": true,
     "match_confidence": "high/medium/low",
-    "verification_notes": "Brief explanation of why this is or isn't the right company",
+    "verification_notes": "Explain the company name relationship (e.g., 'Found as DBA Ole Mexican Foods')",
 
-    "official_name": "The official/legal company name",
-    "dba_names": ["Any 'doing business as' names"],
+    "legal_name": "The registered/legal company name (from OSHA: {company_name})",
+    "operating_name": "The name the company actually operates under (brand/DBA name)",
+    "dba_names": ["All 'doing business as' or trade names found"],
+    "parent_company": "Parent company name if this is a subsidiary",
+
     "description": "What the company does (2-3 sentences)",
 
     "industry": "Primary industry category",
     "sub_industry": "More specific industry",
+    "naics_code": "NAICS code if found",
+    "sic_code": "SIC code if found",
     "services": ["List of services/products offered"],
 
     "year_founded": 2000,
@@ -339,6 +462,7 @@ Extract information into this JSON structure:
     "contact_info": {{
         "main_phone": "Primary phone number",
         "secondary_phone": "Secondary phone if available",
+        "fax": "Fax number if available",
         "main_email": "Primary contact email",
         "contact_form_url": "URL to contact form if no email"
     }},
@@ -351,10 +475,11 @@ Extract information into this JSON structure:
     }},
 
     "other_locations": [
-        {{"address": "Full address", "type": "Branch/Office/Warehouse"}}
+        {{"address": "Full address", "type": "Branch/Office/Warehouse/Plant"}}
     ],
 
     "social_media": {{
+        "website": "Main company website URL",
         "linkedin_url": "LinkedIn company page URL",
         "facebook_url": "Facebook page URL",
         "twitter_url": "Twitter/X URL",
@@ -374,6 +499,7 @@ Extract information into this JSON structure:
 
     "certifications": ["Any safety, quality, industry certifications"],
     "safety_programs": ["Any mentioned safety initiatives or programs"],
+    "union_status": "Union or non-union if mentioned",
 
     "additional_notes": "Any other relevant business information found"
 }}
