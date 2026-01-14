@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
 
+    # Cron/automation secret (optional - for GitHub Actions or external cron)
+    CRON_SECRET: str = ""
+
     # Target contact titles for Apollo search
     SAFETY_TITLES: List[str] = [
         "Safety Director",
