@@ -68,8 +68,11 @@ async def osha_dashboard():
                     <button onclick="openChartsModal()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
                         Charts
                     </button>
-                    <button onclick="triggerSync()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
-                        Sync Now
+                    <button onclick="triggerInspectionSync()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                        Sync Inspections
+                    </button>
+                    <button onclick="triggerViolationSync()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-sm">
+                        Sync Violations
                     </button>
                 </div>
             </div>
@@ -2372,17 +2375,59 @@ async def osha_dashboard():
             }
         }
 
-        async function triggerSync() {
-            if (!confirm('Start syncing OSHA inspection data? This may take a few minutes.')) return;
+        async function triggerInspectionSync() {
+            if (!confirm('Sync OSHA inspection records?\\n\\nThis fetches new inspections from the DOL API.')) return;
 
             try {
-                document.getElementById('sync-status').textContent = 'Syncing...';
-                const result = await fetch(`${API_BASE}/sync?days_back=30`, { method: 'POST' }).then(r => r.json());
-                alert(`Sync complete!\\n\\nFetched: ${result.fetched}\\nCreated: ${result.created}\\nUpdated: ${result.updated}\\nErrors: ${result.errors}`);
+                document.getElementById('sync-status').textContent = 'Syncing inspections...';
+                const result = await fetch(`${API_BASE}/sync?days_back=30&max_requests=2`, { method: 'POST' }).then(r => r.json());
+
+                let message = `Inspection Sync Complete!\\n\\n`;
+                message += `Fetched: ${result.fetched}\\n`;
+                message += `Created: ${result.created}\\n`;
+                message += `Updated: ${result.updated}\\n`;
+                message += `Skipped (old): ${result.skipped_old || 0}\\n`;
+                message += `Skipped (non-SE): ${result.skipped_state || 0}\\n`;
+                message += `Errors: ${result.errors}`;
+
+                if (result.logs && result.logs.length > 0) {
+                    console.log('Sync logs:', result.logs);
+                }
+
+                alert(message);
                 loadInspections();
                 loadSyncStatus();
             } catch (e) {
-                alert('Sync failed: ' + e.message);
+                alert('Inspection sync failed: ' + e.message);
+                document.getElementById('sync-status').textContent = 'Sync failed';
+            }
+        }
+
+        async function triggerViolationSync() {
+            if (!confirm('Sync violations for existing inspections?\\n\\nThis checks inspections for new citations/penalties.')) return;
+
+            try {
+                document.getElementById('sync-status').textContent = 'Syncing violations...';
+                const result = await fetch(`${API_BASE}/sync/violations?max_inspections=3`, { method: 'POST' }).then(r => r.json());
+
+                let message = `Violation Sync Complete!\\n\\n`;
+                message += `Inspections checked: ${result.inspections_checked}\\n`;
+                message += `New violations found: ${result.new_violations_found}\\n`;
+                message += `Updated violations: ${result.updated_violations}\\n`;
+                message += `Inspections with new: ${result.inspections_with_new_violations}\\n`;
+                message += `Errors: ${result.errors}`;
+
+                if (result.logs && result.logs.length > 0) {
+                    console.log('Violation sync logs:', result.logs);
+                }
+
+                alert(message);
+                loadInspections();
+                loadNewViolations();
+                loadSyncStatus();
+            } catch (e) {
+                alert('Violation sync failed: ' + e.message);
+                document.getElementById('sync-status').textContent = 'Sync failed';
             }
         }
 
