@@ -85,6 +85,7 @@ class SyncResponse(BaseModel):
     skipped_old: int = 0
     skipped_state: int = 0
     errors: int
+    logs: List[str] = []  # Detailed log messages for debugging
 
 
 class StatsResponse(BaseModel):

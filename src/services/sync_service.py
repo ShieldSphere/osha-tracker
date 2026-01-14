@@ -1,6 +1,7 @@
 import logging
+import traceback
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -29,13 +30,38 @@ SOUTHEAST_STATES = {
 }
 
 
+class LogCollector:
+    """Collects log messages for returning in API responses."""
+
+    def __init__(self):
+        self.messages: List[str] = []
+
+    def log(self, message: str):
+        """Add a log message with timestamp."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.messages.append(f"[{timestamp}] {message}")
+        logger.info(message)  # Also log to standard logger
+
+    def error(self, message: str, exc: Exception = None):
+        """Add an error message with timestamp."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        error_msg = f"[{timestamp}] ERROR: {message}"
+        if exc:
+            error_msg += f" - {type(exc).__name__}: {str(exc)}"
+        self.messages.append(error_msg)
+        logger.error(message)
+
+    def get_logs(self) -> List[str]:
+        return self.messages
+
+
 class SyncService:
     """Service to sync OSHA inspection data to the database."""
 
     def __init__(self):
         self.osha_client = OSHAClient()
 
-    async def sync_inspections(self, days_back: int = 30) -> Dict[str, int]:
+    async def sync_inspections(self, days_back: int = 30) -> Dict[str, Any]:
         """
         Fetch inspections from OSHA and sync to database.
 
@@ -43,9 +69,10 @@ class SyncService:
             days_back: Number of days to look back for inspections
 
         Returns:
-            Dictionary with sync statistics
+            Dictionary with sync statistics and log messages
         """
-        logger.info(f"Starting OSHA inspection sync (days_back={days_back})")
+        logs = LogCollector()
+        logs.log(f"Starting OSHA inspection sync (days_back={days_back})")
 
         stats = {
             "fetched": 0,
@@ -54,49 +81,81 @@ class SyncService:
             "skipped_old": 0,
             "skipped_state": 0,
             "errors": 0,
+            "logs": [],
         }
 
         try:
             # Calculate since_date from days_back
             since_date = (datetime.now() - timedelta(days=days_back)).date()
+            logs.log(f"Fetching inspections with open_date > {since_date}")
+
+            # Check API key
+            from src.config import settings
+            if not settings.DOL_API_KEY:
+                logs.error("DOL_API_KEY is not configured!")
+                stats["logs"] = logs.get_logs()
+                return stats
+
+            logs.log(f"DOL API Key configured: {settings.DOL_API_KEY[:8]}...")
 
             # Fetch inspections from OSHA API
-            raw_inspections = await self.osha_client.fetch_all_new_inspections(
-                since_date=since_date
-            )
-            stats["fetched"] = len(raw_inspections)
+            logs.log("Calling OSHA API fetch_all_new_inspections...")
+            try:
+                raw_inspections = await self.osha_client.fetch_all_new_inspections(
+                    since_date=since_date,
+                    log_collector=logs  # Pass log collector to client
+                )
+                stats["fetched"] = len(raw_inspections)
+                logs.log(f"API returned {len(raw_inspections)} total inspections")
+            except Exception as api_err:
+                logs.error(f"API call failed", api_err)
+                logs.log(f"Traceback: {traceback.format_exc()}")
+                stats["logs"] = logs.get_logs()
+                return stats
 
             if not raw_inspections:
-                logger.info("No inspections found to sync")
+                logs.log("No inspections returned from API - nothing to sync")
+                stats["logs"] = logs.get_logs()
                 return stats
 
             # Process each inspection
-            with get_db_session() as db:
-                for raw in raw_inspections:
-                    try:
-                        created, updated, skip_reason = self._upsert_inspection(db, raw)
-                        if created:
-                            stats["created"] += 1
-                        elif updated:
-                            stats["updated"] += 1
-                        elif skip_reason == "old":
-                            stats["skipped_old"] += 1
-                        elif skip_reason == "state":
-                            stats["skipped_state"] += 1
-                    except Exception as e:
-                        logger.error(f"Error processing inspection: {e}")
-                        stats["errors"] += 1
+            logs.log("Processing inspections and saving to database...")
+            try:
+                with get_db_session() as db:
+                    for i, raw in enumerate(raw_inspections):
+                        try:
+                            created, updated, skip_reason = self._upsert_inspection(db, raw)
+                            if created:
+                                stats["created"] += 1
+                            elif updated:
+                                stats["updated"] += 1
+                            elif skip_reason == "old":
+                                stats["skipped_old"] += 1
+                            elif skip_reason == "state":
+                                stats["skipped_state"] += 1
 
-            logger.info(
+                            # Log progress every 100 records
+                            if (i + 1) % 100 == 0:
+                                logs.log(f"Processed {i + 1}/{len(raw_inspections)} inspections...")
+
+                        except Exception as e:
+                            logs.error(f"Error processing inspection {raw.get('activity_nr', 'unknown')}", e)
+                            stats["errors"] += 1
+            except Exception as db_err:
+                logs.error(f"Database error", db_err)
+                logs.log(f"Traceback: {traceback.format_exc()}")
+
+            logs.log(
                 f"Sync completed: {stats['created']} created, "
                 f"{stats['updated']} updated, {stats['skipped_old']} skipped (pre-2020), "
                 f"{stats['skipped_state']} skipped (non-SE states), {stats['errors']} errors"
             )
 
         except Exception as e:
-            logger.error(f"Sync failed: {e}")
-            raise
+            logs.error(f"Sync failed with unexpected error", e)
+            logs.log(f"Traceback: {traceback.format_exc()}")
 
+        stats["logs"] = logs.get_logs()
         return stats
 
     def _upsert_inspection(
@@ -119,13 +178,11 @@ class SyncService:
         # Filter: Only accept inspections from 2020 onwards
         open_date = parsed.get("open_date")
         if open_date and open_date.year < 2020:
-            logger.debug(f"Skipping inspection {activity_nr} - too old ({open_date.year})")
             return False, False, "old"
 
         # Filter: Only accept inspections from southeast states
         site_state = parsed.get("site_state")
         if site_state and site_state.upper() not in SOUTHEAST_STATES:
-            logger.debug(f"Skipping inspection {activity_nr} - not in southeast ({site_state})")
             return False, False, "state"
 
         # Check if inspection already exists

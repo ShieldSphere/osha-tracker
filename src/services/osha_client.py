@@ -11,9 +11,12 @@ import asyncio
 import logging
 import json
 from datetime import date, datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from src.config import settings
+
+if TYPE_CHECKING:
+    from src.services.sync_service import LogCollector
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +48,26 @@ class OSHAClient:
         self.api_key = settings.DOL_API_KEY
         self.request_count = 0  # Track requests in this session
 
-    def _log_request(self, endpoint: str, params: dict, note: str = ""):
+    def _log_request(self, endpoint: str, params: dict, note: str = "", log_collector: Optional["LogCollector"] = None):
         """Log API request with timestamp for debugging."""
         self.request_count += 1
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         filter_info = params.get("filter_object", "none")
-        logger.info(
-            f"[{timestamp}] API Request #{self.request_count}: {endpoint} | "
+        msg = (
+            f"API Request #{self.request_count}: {endpoint} | "
             f"limit={params.get('limit')} offset={params.get('offset')} | "
-            f"filter={filter_info} | {note}"
+            f"filter={filter_info[:50]}... | {note}"
         )
+        logger.info(f"[{timestamp}] {msg}")
+        if log_collector:
+            log_collector.log(msg)
 
     async def _make_request(
         self,
         endpoint: str,
         params: dict,
-        note: str = ""
+        note: str = "",
+        log_collector: Optional["LogCollector"] = None
     ) -> List[Dict[str, Any]]:
         """
         Make an API request with exponential backoff on rate limits.
@@ -69,6 +76,7 @@ class OSHAClient:
             endpoint: API endpoint (e.g., "inspection/json")
             params: Query parameters
             note: Optional note for logging
+            log_collector: Optional LogCollector for response logging
 
         Returns:
             List of records from API response
@@ -76,43 +84,78 @@ class OSHAClient:
         url = f"{self.base_url}/{endpoint}"
         params["X-API-KEY"] = self.api_key
 
-        self._log_request(endpoint, params, note)
+        self._log_request(endpoint, params, note, log_collector)
+
+        if log_collector:
+            log_collector.log(f"Making request to: {url}")
 
         async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
             for attempt, backoff in enumerate(BACKOFF_DELAYS + [None]):
                 try:
                     response = await client.get(url, params=params)
+
+                    if log_collector:
+                        log_collector.log(f"Response status: {response.status_code}")
+
                     response.raise_for_status()
 
                     # Handle 204 No Content (no matching records)
                     if response.status_code == 204 or not response.text:
-                        logger.info(f"  -> No records found (204 No Content)")
+                        msg = "No records found (204 No Content)"
+                        logger.info(f"  -> {msg}")
+                        if log_collector:
+                            log_collector.log(msg)
                         return []
 
                     result = response.json()
 
                     # API returns data in a 'data' key
                     data = result.get("data", []) if isinstance(result, dict) else result
-                    logger.info(f"  -> Received {len(data)} records")
+                    msg = f"Received {len(data)} records"
+                    logger.info(f"  -> {msg}")
+                    if log_collector:
+                        log_collector.log(msg)
                     return data
 
                 except httpx.HTTPStatusError as e:
+                    error_msg = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
+                    if log_collector:
+                        log_collector.error(error_msg)
+
                     if e.response.status_code == 429:
                         if backoff is None:
-                            logger.error(f"Rate limited after {len(BACKOFF_DELAYS)} retries, giving up")
+                            msg = f"Rate limited after {len(BACKOFF_DELAYS)} retries, giving up"
+                            logger.error(msg)
+                            if log_collector:
+                                log_collector.error(msg)
                             return []
-                        logger.warning(
-                            f"Rate limited (429), attempt {attempt + 1}/{len(BACKOFF_DELAYS)}. "
-                            f"Waiting {backoff} seconds..."
-                        )
+                        msg = f"Rate limited (429), attempt {attempt + 1}/{len(BACKOFF_DELAYS)}. Waiting {backoff}s..."
+                        logger.warning(msg)
+                        if log_collector:
+                            log_collector.log(msg)
                         await asyncio.sleep(backoff)
                         continue
+                    elif e.response.status_code == 401:
+                        msg = "Authentication failed - check DOL_API_KEY"
+                        logger.error(msg)
+                        if log_collector:
+                            log_collector.error(msg)
+                        raise
+                    elif e.response.status_code == 403:
+                        msg = "Access forbidden - API key may not have access to this endpoint"
+                        logger.error(msg)
+                        if log_collector:
+                            log_collector.error(msg)
+                        raise
                     else:
                         logger.error(f"HTTP error {e.response.status_code}: {e.response.text}")
                         raise
 
                 except httpx.RequestError as e:
-                    logger.error(f"Request error: {e}")
+                    msg = f"Request error: {type(e).__name__}: {str(e)}"
+                    logger.error(msg)
+                    if log_collector:
+                        log_collector.error(msg)
                     raise
 
         return []
@@ -122,6 +165,7 @@ class OSHAClient:
         since_date: date,
         limit: int = MAX_RECORDS_PER_REQUEST,
         offset: int = 0,
+        log_collector: Optional["LogCollector"] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch inspections with open_date > since_date using server-side filtering.
@@ -130,6 +174,7 @@ class OSHAClient:
             since_date: Only fetch inspections opened AFTER this date
             limit: Records per request (max 200)
             offset: Pagination offset
+            log_collector: Optional LogCollector for response logging
 
         Returns:
             List of inspection records
@@ -153,7 +198,8 @@ class OSHAClient:
         return await self._make_request(
             "inspection/json",
             params,
-            note=f"open_date > {date_str}"
+            note=f"open_date > {date_str}",
+            log_collector=log_collector
         )
 
     async def fetch_violations_for_activity_nrs(
@@ -161,6 +207,7 @@ class OSHAClient:
         activity_nrs: List[str],
         limit: int = MAX_RECORDS_PER_REQUEST,
         offset: int = 0,
+        log_collector: Optional["LogCollector"] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch violations for multiple inspections using "in" filter.
@@ -169,6 +216,7 @@ class OSHAClient:
             activity_nrs: List of activity numbers to fetch violations for
             limit: Records per request (max 200)
             offset: Pagination offset
+            log_collector: Optional LogCollector for response logging
 
         Returns:
             List of violation records
@@ -192,13 +240,15 @@ class OSHAClient:
         return await self._make_request(
             "violation/json",
             params,
-            note=f"{len(activity_nrs)} activity_nrs"
+            note=f"{len(activity_nrs)} activity_nrs",
+            log_collector=log_collector
         )
 
     async def fetch_all_new_inspections(
         self,
         since_date: date,
         max_requests: int = MAX_REQUESTS_PER_RUN,
+        log_collector: Optional["LogCollector"] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch ALL inspections with open_date > since_date.
@@ -208,6 +258,7 @@ class OSHAClient:
         Args:
             since_date: Only fetch inspections opened AFTER this date
             max_requests: Maximum API requests to prevent runaway calls
+            log_collector: Optional LogCollector for response logging
 
         Returns:
             List of all matching inspection records
@@ -216,46 +267,68 @@ class OSHAClient:
         offset = 0
         requests_made = 0
 
-        logger.info(f"Fetching inspections with open_date > {since_date}")
-        logger.info(f"Rate limiting: {API_DELAY}s between requests, max {max_requests} requests")
+        msg1 = f"Fetching inspections with open_date > {since_date}"
+        msg2 = f"Rate limiting: {API_DELAY}s between requests, max {max_requests} requests"
+        logger.info(msg1)
+        logger.info(msg2)
+        if log_collector:
+            log_collector.log(msg1)
+            log_collector.log(msg2)
 
         while requests_made < max_requests:
             batch = await self.fetch_inspections_since(
                 since_date=since_date,
                 limit=MAX_RECORDS_PER_REQUEST,
                 offset=offset,
+                log_collector=log_collector,
             )
             requests_made += 1
 
             if not batch:
-                logger.info(f"No more records at offset {offset}")
+                msg = f"No more records at offset {offset}"
+                logger.info(msg)
+                if log_collector:
+                    log_collector.log(msg)
                 break
 
             all_inspections.extend(batch)
             offset += len(batch)
 
-            logger.info(f"Progress: {len(all_inspections)} total inspections fetched")
+            msg = f"Progress: {len(all_inspections)} total inspections fetched"
+            logger.info(msg)
+            if log_collector:
+                log_collector.log(msg)
 
             # If we got fewer than requested, we've reached the end
             if len(batch) < MAX_RECORDS_PER_REQUEST:
-                logger.info("Reached end of results")
+                msg = "Reached end of results"
+                logger.info(msg)
+                if log_collector:
+                    log_collector.log(msg)
                 break
 
             # Rate limiting delay
+            if log_collector:
+                log_collector.log(f"Waiting {API_DELAY}s before next request...")
             await asyncio.sleep(API_DELAY)
 
         if requests_made >= max_requests:
-            logger.warning(f"Reached max requests limit ({max_requests})")
+            msg = f"Reached max requests limit ({max_requests})"
+            logger.warning(msg)
+            if log_collector:
+                log_collector.log(msg)
 
-        logger.info(
-            f"Completed: {len(all_inspections)} inspections fetched in {requests_made} requests"
-        )
+        msg = f"Completed: {len(all_inspections)} inspections fetched in {requests_made} requests"
+        logger.info(msg)
+        if log_collector:
+            log_collector.log(msg)
         return all_inspections
 
     async def fetch_all_violations_for_inspections(
         self,
         activity_nrs: List[str],
         max_requests: int = MAX_REQUESTS_PER_RUN,
+        log_collector: Optional["LogCollector"] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch violations for a list of inspections.
@@ -265,6 +338,7 @@ class OSHAClient:
         Args:
             activity_nrs: List of inspection activity numbers
             max_requests: Maximum API requests to prevent runaway calls
+            log_collector: Optional LogCollector for response logging
 
         Returns:
             List of all violation records
@@ -281,17 +355,26 @@ class OSHAClient:
             for i in range(0, len(activity_nrs), ACTIVITY_NR_BATCH_SIZE)
         ]
 
-        logger.info(
+        msg = (
             f"Fetching violations for {len(activity_nrs)} inspections "
             f"in {len(batches)} batches of up to {ACTIVITY_NR_BATCH_SIZE}"
         )
+        logger.info(msg)
+        if log_collector:
+            log_collector.log(msg)
 
         for batch_num, batch_nrs in enumerate(batches):
             if requests_made >= max_requests:
-                logger.warning(f"Reached max requests limit ({max_requests})")
+                msg = f"Reached max requests limit ({max_requests})"
+                logger.warning(msg)
+                if log_collector:
+                    log_collector.log(msg)
                 break
 
-            logger.info(f"Processing batch {batch_num + 1}/{len(batches)}")
+            msg = f"Processing batch {batch_num + 1}/{len(batches)}"
+            logger.info(msg)
+            if log_collector:
+                log_collector.log(msg)
 
             # Paginate through this batch
             offset = 0
@@ -300,6 +383,7 @@ class OSHAClient:
                     activity_nrs=batch_nrs,
                     limit=MAX_RECORDS_PER_REQUEST,
                     offset=offset,
+                    log_collector=log_collector,
                 )
                 requests_made += 1
 
@@ -320,9 +404,10 @@ class OSHAClient:
             if batch_num < len(batches) - 1:
                 await asyncio.sleep(API_DELAY)
 
-        logger.info(
-            f"Completed: {len(all_violations)} violations fetched in {requests_made} requests"
-        )
+        msg = f"Completed: {len(all_violations)} violations fetched in {requests_made} requests"
+        logger.info(msg)
+        if log_collector:
+            log_collector.log(msg)
         return all_violations
 
     # =========================================================================
