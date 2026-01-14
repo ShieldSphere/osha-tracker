@@ -17,7 +17,7 @@ from sqlalchemy import select, and_, or_, func
 from src.database.models import Inspection, Violation
 from src.database.connection import get_db_session
 from src.services.osha_client import OSHAClient
-from src.services.sync_service import SOUTHEAST_STATES
+from src.services.sync_service import SOUTHEAST_STATES, LogCollector
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ class ViolationSyncService:
 
     async def sync_violations_smart(
         self,
-        max_inspections_to_check: int = 100,
-        rate_limit_delay: float = 3.0  # Increased from 1.2 to match conservative API delay
+        max_inspections_to_check: int = 3,  # Default 3 for Vercel timeout
+        rate_limit_delay: float = 1.5  # Reduced for serverless
     ) -> Dict[str, Any]:
         """
         Smart violation sync: Check inspections most likely to have new violations.
@@ -43,12 +43,15 @@ class ViolationSyncService:
         4. Skip inspections older than 12 months with violations (unlikely to change)
 
         Args:
-            max_inspections_to_check: Limit to avoid rate limiting
+            max_inspections_to_check: Limit to avoid rate limiting (default 3 for Vercel)
             rate_limit_delay: Seconds between API calls
 
         Returns:
-            Sync statistics
+            Sync statistics with logs
         """
+        logs = LogCollector()
+        logs.log(f"Starting violation sync (max_inspections={max_inspections_to_check}, delay={rate_limit_delay}s)")
+
         stats = {
             "inspections_checked": 0,
             "inspections_with_new_violations": 0,
@@ -56,66 +59,75 @@ class ViolationSyncService:
             "updated_violations": 0,
             "errors": 0,
             "skipped": 0,
+            "logs": [],
         }
 
-        logger.info(f"Starting smart violation sync (max_inspections={max_inspections_to_check})")
+        try:
+            with get_db_session() as db:
+                # Get candidate inspections to check
+                candidates = self._get_candidate_inspections(db, max_inspections_to_check)
+                logs.log(f"Found {len(candidates)} candidate inspections to check")
 
-        with get_db_session() as db:
-            # Get candidate inspections to check
-            candidates = self._get_candidate_inspections(db, max_inspections_to_check)
-            logger.info(f"Found {len(candidates)} candidate inspections to check for violations")
+                for i, inspection in enumerate(candidates):
+                    try:
+                        if i > 0:  # Don't delay before first request
+                            await asyncio.sleep(rate_limit_delay)
 
-            for inspection in candidates:
-                try:
-                    await asyncio.sleep(rate_limit_delay)  # Rate limiting
+                        logs.log(f"Checking inspection {inspection.activity_nr} ({inspection.estab_name})")
 
-                    # Fetch violations from API
-                    api_violations = await self.osha_client.fetch_violations_for_inspection(
-                        inspection.activity_nr
-                    )
-
-                    stats["inspections_checked"] += 1
-
-                    if not api_violations:
-                        logger.debug(f"No violations found for {inspection.activity_nr}")
-                        # Update last check timestamp
-                        self._update_last_violation_check(db, inspection)
-                        continue
-
-                    # Process violations
-                    new_count, updated_count, had_new = await self._process_violations(
-                        db, inspection, api_violations
-                    )
-
-                    stats["new_violations_found"] += new_count
-                    stats["updated_violations"] += updated_count
-
-                    if had_new:
-                        stats["inspections_with_new_violations"] += 1
-                        logger.info(
-                            f"✓ Found {new_count} NEW violations for {inspection.estab_name} "
-                            f"(inspection {inspection.activity_nr})"
+                        # Fetch violations from API
+                        api_violations = await self.osha_client.fetch_violations_for_inspection(
+                            inspection.activity_nr
                         )
 
-                        # Flag inspection with new violations
-                        inspection.new_violations_detected = True
-                        inspection.new_violations_count = new_count
-                        inspection.new_violations_date = datetime.utcnow()
+                        stats["inspections_checked"] += 1
 
-                    # Update inspection last check and penalties
-                    self._update_inspection_penalties(db, inspection)
-                    self._update_last_violation_check(db, inspection)
+                        if not api_violations:
+                            logs.log(f"  No violations found for {inspection.activity_nr}")
+                            # Update last check timestamp
+                            self._update_last_violation_check(db, inspection)
+                            continue
 
-                except Exception as e:
-                    logger.error(f"Error syncing violations for {inspection.activity_nr}: {e}")
-                    stats["errors"] += 1
+                        logs.log(f"  Found {len(api_violations)} violations from API")
 
-        logger.info(
-            f"Violation sync complete: checked {stats['inspections_checked']}, "
-            f"found {stats['new_violations_found']} new violations across "
-            f"{stats['inspections_with_new_violations']} inspections"
-        )
+                        # Process violations
+                        new_count, updated_count, had_new = await self._process_violations(
+                            db, inspection, api_violations
+                        )
 
+                        stats["new_violations_found"] += new_count
+                        stats["updated_violations"] += updated_count
+
+                        if had_new:
+                            stats["inspections_with_new_violations"] += 1
+                            logs.log(
+                                f"  ✓ NEW: {new_count} new violations for {inspection.estab_name}"
+                            )
+
+                            # Flag inspection with new violations
+                            inspection.new_violations_detected = True
+                            inspection.new_violations_count = new_count
+                            inspection.new_violations_date = datetime.utcnow()
+                        else:
+                            logs.log(f"  No new violations (updated {updated_count})")
+
+                        # Update inspection last check and penalties
+                        self._update_inspection_penalties(db, inspection)
+                        self._update_last_violation_check(db, inspection)
+
+                    except Exception as e:
+                        logs.error(f"Error syncing violations for {inspection.activity_nr}", e)
+                        stats["errors"] += 1
+
+            logs.log(
+                f"Sync complete: {stats['inspections_checked']} checked, "
+                f"{stats['new_violations_found']} new violations"
+            )
+
+        except Exception as e:
+            logs.error(f"Violation sync failed", e)
+
+        stats["logs"] = logs.get_logs()
         return stats
 
     def _get_candidate_inspections(

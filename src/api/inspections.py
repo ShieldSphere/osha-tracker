@@ -792,22 +792,31 @@ class ViolationSyncResponse(BaseModel):
     skipped: int
 
 
-@router.post("/sync/violations", response_model=ViolationSyncResponse)
+class ViolationSyncResponseWithLogs(ViolationSyncResponse):
+    """Response model for violation sync with logs."""
+    logs: List[str] = []
+
+
+@router.post("/sync/violations", response_model=ViolationSyncResponseWithLogs)
 async def trigger_violation_sync(
-    max_inspections: int = Query(100, ge=1, le=500, description="Max inspections to check")
+    max_inspections: int = Query(3, ge=1, le=500, description="Max inspections to check (default 3 for Vercel timeout)")
 ):
     """
     Manually trigger a violation sync for existing inspections.
 
     This checks existing inspections for NEW violations that may have been issued.
     Focuses on inspections in the citation window (3-9 months old).
+
+    Note: Vercel has 10-second timeout. Default is 3 inspections with 1.5s delay.
+    Call multiple times for more coverage.
     """
     from src.services.violation_sync_service import violation_sync_service
 
     stats = await violation_sync_service.sync_violations_smart(
-        max_inspections_to_check=max_inspections
+        max_inspections_to_check=max_inspections,
+        rate_limit_delay=1.5  # Match the inspection sync delay
     )
-    return ViolationSyncResponse(**stats)
+    return ViolationSyncResponseWithLogs(**stats)
 
 
 @router.post("/{inspection_id}/sync-violations")
