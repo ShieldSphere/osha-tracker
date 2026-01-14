@@ -61,18 +61,19 @@ class SyncService:
     def __init__(self):
         self.osha_client = OSHAClient()
 
-    async def sync_inspections(self, days_back: int = 30) -> Dict[str, Any]:
+    async def sync_inspections(self, days_back: int = 30, max_requests: int = 3) -> Dict[str, Any]:
         """
         Fetch inspections from OSHA and sync to database.
 
         Args:
             days_back: Number of days to look back for inspections
+            max_requests: Maximum API requests to make (default 3 for Vercel timeout)
 
         Returns:
             Dictionary with sync statistics and log messages
         """
         logs = LogCollector()
-        logs.log(f"Starting OSHA inspection sync (days_back={days_back})")
+        logs.log(f"Starting OSHA inspection sync (days_back={days_back}, max_requests={max_requests})")
 
         stats = {
             "fetched": 0,
@@ -99,10 +100,11 @@ class SyncService:
             logs.log(f"DOL API Key configured: {settings.DOL_API_KEY[:8]}...")
 
             # Fetch inspections from OSHA API
-            logs.log("Calling OSHA API fetch_all_new_inspections...")
+            logs.log(f"Calling OSHA API fetch_all_new_inspections (max {max_requests} requests)...")
             try:
                 raw_inspections = await self.osha_client.fetch_all_new_inspections(
                     since_date=since_date,
+                    max_requests=max_requests,
                     log_collector=logs  # Pass log collector to client
                 )
                 stats["fetched"] = len(raw_inspections)

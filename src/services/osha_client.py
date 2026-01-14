@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # RATE LIMITING CONFIGURATION
 # =============================================================================
-API_DELAY = 3.0  # Seconds between ALL requests
+API_DELAY = 0.5  # Seconds between requests (reduced for serverless - was 3.0)
 MAX_RECORDS_PER_REQUEST = 200  # API limit per request (DOL allows up to 200)
 MAX_REQUESTS_PER_RUN = 50  # Prevent runaway API calls
 ACTIVITY_NR_BATCH_SIZE = 100  # Max activity_nrs per "in" filter request
