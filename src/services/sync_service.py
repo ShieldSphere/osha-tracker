@@ -12,9 +12,9 @@ from src.services.osha_client import OSHAClient
 
 logger = logging.getLogger(__name__)
 
-# Southeast states to focus on for sync
+# Target states for sync (Southeast + Texas)
 # This limits API calls and keeps database focused on target region
-SOUTHEAST_STATES = {
+TARGET_STATES = {
     "AL",  # Alabama
     "AR",  # Arkansas
     "FL",  # Florida
@@ -25,9 +25,13 @@ SOUTHEAST_STATES = {
     "NC",  # North Carolina
     "SC",  # South Carolina
     "TN",  # Tennessee
+    "TX",  # Texas
     "VA",  # Virginia
     "WV",  # West Virginia
 }
+
+# Alias for backwards compatibility
+SOUTHEAST_STATES = TARGET_STATES
 
 
 class LogCollector:

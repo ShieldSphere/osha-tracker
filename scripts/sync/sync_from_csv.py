@@ -10,23 +10,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import csv
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from src.database.connection import get_db_session
 from src.database.models import Inspection
-from src.services.sync_service import SOUTHEAST_STATES
+from src.services.sync_service import TARGET_STATES
 from sqlalchemy import select
 
-def sync_inspections_from_csv(csv_path: str, min_year: int = 2020):
+def sync_inspections_from_csv(csv_path: str, months_back: int = 6):
     """
     Import inspections from OSHA CSV file.
 
     Args:
         csv_path: Path to the CSV file
-        min_year: Only import inspections from this year onwards
+        months_back: Only import inspections from the last N months
     """
+    min_date = date.today() - timedelta(days=months_back * 30)
+
     print("=" * 60)
     print(f"Syncing Inspections from CSV: {csv_path}")
-    print(f"Filter: SE states only, {min_year}+ only")
+    print(f"Filter: Target states (SE + TX), since {min_date}")
     print("=" * 60)
 
     stats = {
@@ -51,7 +53,7 @@ def sync_inspections_from_csv(csv_path: str, min_year: int = 2020):
 
             # Filter by state
             state = row.get('site_state', '').strip().upper()
-            if state not in SOUTHEAST_STATES:
+            if state not in TARGET_STATES:
                 stats["skipped_state"] += 1
                 continue
 
@@ -63,7 +65,7 @@ def sync_inspections_from_csv(csv_path: str, min_year: int = 2020):
 
             try:
                 open_date = datetime.strptime(open_date_str[:10], '%Y-%m-%d').date()
-                if open_date.year < min_year:
+                if open_date < min_date:
                     stats["skipped_old"] += 1
                     continue
             except:
@@ -73,9 +75,9 @@ def sync_inspections_from_csv(csv_path: str, min_year: int = 2020):
             records_to_process.append(row)
 
     print(f"Total rows in CSV: {stats['total_rows']:,}")
-    print(f"Records to process (SE, {min_year}+): {len(records_to_process):,}")
-    print(f"Skipped (non-SE): {stats['skipped_state']:,}")
-    print(f"Skipped (pre-{min_year}): {stats['skipped_old']:,}")
+    print(f"Records to process (target states, last {months_back} months): {len(records_to_process):,}")
+    print(f"Skipped (non-target state): {stats['skipped_state']:,}")
+    print(f"Skipped (older than {min_date}): {stats['skipped_old']:,}")
 
     # Process records
     print("\nProcessing records...")
