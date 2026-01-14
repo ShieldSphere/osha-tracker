@@ -46,15 +46,15 @@ async def osha_dashboard():
 </head>
 <body class="bg-gray-100 min-h-screen">
     <nav class="bg-gray-900 text-white shadow-lg">
-        <div class="container mx-auto px-4">
+        <div class="max-w-7xl mx-auto px-4">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center space-x-8">
                     <h1 class="text-xl font-bold">TSG Safety</h1>
                     <div class="flex space-x-1">
-                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
-                        <a href="/osha" class="px-3 py-2 rounded-md text-sm font-medium bg-blue-600 text-white">OSHA</a>
-                        <a href="/epa" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">EPA</a>
-                        <a href="/crm" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">CRM</a>
+                        <a href="/" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
+                        <a href="/osha" class="px-4 py-2 rounded-md text-sm font-medium bg-blue-600 text-white">OSHA</a>
+                        <a href="/epa" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">EPA</a>
+                        <a href="/crm" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">CRM</a>
                     </div>
                 </div>
                 <div class="flex items-center gap-4">
@@ -79,7 +79,11 @@ async def osha_dashboard():
         </div>
     </nav>
 
-    <main class="container mx-auto p-6">
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-800">OSHA Inspections</h2>
+            <p class="text-gray-600 mt-1">Track inspections, violations, and enrichment status</p>
+        </div>
         <div class="flex flex-col lg:flex-row gap-6">
             <!-- Left Sidebar - Stats Cards -->
             <div class="lg:w-48 flex-shrink-0">
@@ -91,26 +95,26 @@ async def osha_dashboard():
                     </div>
                     <!-- New Inspections Widget -->
                     <div class="bg-gradient-to-br from-blue-50 to-cyan-50 p-2.5 rounded-lg shadow border border-blue-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openNewInspectionsModal()">
-                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">📋 New Inspections (7d)</h3>
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">New Inspections (7d)</h3>
                         <p id="new-inspections-count" class="text-lg font-bold text-blue-600">-</p>
                         <p id="new-inspections-companies" class="text-[10px] text-gray-600">Loading...</p>
                     </div>
                     <!-- New Violations Widget -->
                     <div class="bg-gradient-to-br from-orange-50 to-red-50 p-2.5 rounded-lg shadow border border-orange-200 cursor-pointer hover:shadow-md transition-shadow" onclick="openNewViolationsModal()">
-                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">🚨 New Penalties (45d)</h3>
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">New Penalties (45d)</h3>
                         <p id="new-violations-count" class="text-lg font-bold text-orange-600">-</p>
                         <p id="new-violations-companies" class="text-[10px] text-gray-600">Loading...</p>
                         <p id="new-violations-penalties" class="text-[10px] text-gray-600"></p>
                     </div>
                     <!-- CRM Pipeline Widget -->
                     <a href="/crm" class="block bg-gradient-to-br from-purple-50 to-indigo-50 p-2.5 rounded-lg shadow border border-purple-200 cursor-pointer hover:shadow-md transition-shadow">
-                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">👥 CRM Pipeline</h3>
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">CRM Pipeline</h3>
                         <p id="crm-total-prospects" class="text-lg font-bold text-purple-600">-</p>
                         <p id="crm-pipeline-value" class="text-[10px] text-gray-600">Loading...</p>
                     </a>
                     <!-- Upcoming Callbacks Widget -->
                     <a href="/crm" class="block bg-gradient-to-br from-green-50 to-emerald-50 p-2.5 rounded-lg shadow border border-green-200 cursor-pointer hover:shadow-md transition-shadow">
-                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">📅 Callbacks (7d)</h3>
+                        <h3 class="text-gray-700 text-[10px] uppercase tracking-wider font-semibold mb-1">Callbacks (7d)</h3>
                         <p id="crm-upcoming-callbacks" class="text-lg font-bold text-green-600">-</p>
                         <p id="crm-overdue-callbacks" class="text-[10px] text-red-600"></p>
                     </a>
@@ -353,7 +357,7 @@ async def osha_dashboard():
         <div class="bg-white rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[90vh] flex flex-col">
             <div class="p-6 border-b flex justify-between items-center bg-gradient-to-r from-blue-50 to-cyan-50">
                 <div>
-                    <h2 class="text-xl font-semibold text-gray-800">📋 New Inspections (Last 7 Days)</h2>
+                    <h2 class="text-xl font-semibold text-gray-800">New Inspections (Last 7 Days)</h2>
                     <p id="new-inspections-modal-subtitle" class="text-sm text-gray-600 mt-1"></p>
                 </div>
                 <button onclick="closeNewInspectionsModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
@@ -382,7 +386,7 @@ async def osha_dashboard():
         <div class="bg-white rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[90vh] flex flex-col">
             <div class="p-6 border-b flex justify-between items-center bg-gradient-to-r from-orange-50 to-red-50">
                 <div>
-                    <h2 class="text-xl font-semibold text-gray-800">🚨 New Penalties (Last 45 Days)</h2>
+                    <h2 class="text-xl font-semibold text-gray-800">New Penalties (Last 45 Days)</h2>
                     <p id="new-violations-modal-subtitle" class="text-sm text-gray-600 mt-1"></p>
                 </div>
                 <button onclick="closeNewViolationsModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
@@ -699,7 +703,7 @@ async def osha_dashboard():
                                 onclick="showDetail(${item.inspection_id}); closeNewInspectionsModal();"
                                 class="text-blue-600 hover:text-blue-800 text-sm font-medium"
                             >
-                                View Details →
+                                View Details
                             </button>
                         </td>
                     </tr>
@@ -726,7 +730,7 @@ async def osha_dashboard():
 
             // Update subtitle
             document.getElementById('new-violations-modal-subtitle').textContent =
-                `${data.count} new citations across ${data.total_companies} companies • $${data.total_penalties.toLocaleString(undefined, {maximumFractionDigits: 0})} in penalties`;
+                `${data.count} new citations across ${data.total_companies} companies - $${data.total_penalties.toLocaleString(undefined, {maximumFractionDigits: 0})} in penalties`;
 
             // Populate table
             const tbody = document.getElementById('new-violations-list');
@@ -760,7 +764,7 @@ async def osha_dashboard():
                                 onclick="showDetail(${item.inspection_id}); closeNewViolationsModal();"
                                 class="text-blue-600 hover:text-blue-800 text-sm font-medium"
                             >
-                                View Details →
+                                View Details
                             </button>
                         </td>
                     </tr>
@@ -922,7 +926,7 @@ async def osha_dashboard():
                             return `<td class="px-4 py-3 ${alignClass}">
                                 <div class="flex items-center gap-2">
                                     <div class="font-medium ${hasMultipleInspections ? 'text-orange-700' : ''}">${escapeHtml(i.estab_name)}</div>
-                                    ${hasMultipleInspections ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800" title="Multiple inspections for this company">×${companyNameCounts[companyName]}</span>` : ''}
+                                    ${hasMultipleInspections ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800" title="Multiple inspections for this company">x${companyNameCounts[companyName]}</span>` : ''}
                                 </div>
                             </td>`;
                         case 'activity':
@@ -1516,36 +1520,74 @@ async def osha_dashboard():
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Loading...
+                    Enriching...
                 `;
             }
 
             try {
-                // First, get the enrichment preview (no API credits used)
-                const preview = await fetch(`/api/enrichment/preview/${inspectionId}`).then(r => r.json());
-                currentEnrichmentPreview = preview;
-                currentWebEnrichmentResult = null;
-                currentApolloResult = null;
-                revealedContacts = [];  // Clear revealed contacts for new enrichment
+                // Run web enrichment directly (no preview modal)
+                const webResponse = await fetch(`/api/enrichment/web-enrich/${inspectionId}?quick=false`, { method: 'POST' });
+                const webResult = await webResponse.json();
 
-                // Show the enrichment preview modal
-                showEnrichmentPreviewModal(preview);
+                if (!webResult.success && !webResult.data) {
+                    throw new Error(webResult.error || 'Web enrichment failed');
+                }
 
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = `
-                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
-                        Enrich
-                    `;
+                // Save the web enrichment data
+                const saveResponse = await fetch(`/api/enrichment/save-web-enrichment/${inspectionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data: webResult.data || {},
+                        website_url: webResult.website_url,
+                        confidence: webResult.confidence || 'medium'
+                    })
+                });
+
+                const saveResult = await saveResponse.json();
+
+                if (saveResult.success) {
+                    // Update button to show enriched
+                    if (btn) {
+                        btn.classList.remove('bg-blue-100', 'text-blue-700');
+                        btn.classList.add('bg-green-100', 'text-green-700');
+                        btn.innerHTML = 'Enriched';
+                        btn.disabled = true;
+                    }
+
+                    // Load and display the company data
+                    await loadCompanyData(inspectionId);
+                } else {
+                    throw new Error(saveResult.error || 'Failed to save enrichment');
                 }
             } catch (e) {
-                console.error('Error loading enrichment preview:', e);
+                console.error('Error during enrichment:', e);
                 if (btn) {
                     btn.disabled = false;
                     btn.innerHTML = 'Error - Retry';
                 }
+                alert('Enrichment failed: ' + e.message);
+            }
+        }
+
+        // Open Apollo enrichment modal for an already web-enriched company
+        async function openApolloEnrichmentModal(inspectionId) {
+            try {
+                // Get the enrichment preview (includes existing domain/website)
+                const preview = await fetch(`/api/enrichment/preview/${inspectionId}`).then(r => r.json());
+                currentEnrichmentPreview = preview;
+                currentWebEnrichmentResult = null;
+                currentApolloResult = null;
+                revealedContacts = [];
+
+                // Mark as re-enrich since we already have web data
+                preview.isReEnrich = true;
+
+                // Show the enrichment preview modal
+                showEnrichmentPreviewModal(preview);
+            } catch (e) {
+                console.error('Error opening Apollo enrichment:', e);
+                alert('Error loading enrichment options: ' + e.message);
             }
         }
 
@@ -2000,8 +2042,8 @@ async def osha_dashboard():
         function updateRevealButtonState() {
             const checkboxes = document.querySelectorAll('.contact-checkbox:checked');
             const btn = document.getElementById('reveal-contacts-btn');
-            const revealEmail = document.getElementById('reveal-email-option')?.checked ?? true;
-            const revealPhone = document.getElementById('reveal-phone-option')?.checked ?? false;
+            const revealEmail = document.getElementById('reveal-email-option')?.checked ? true : false;
+            const revealPhone = document.getElementById('reveal-phone-option')?.checked ? true : false;
 
             if (btn) {
                 const count = checkboxes.length;
@@ -2021,8 +2063,8 @@ async def osha_dashboard():
         async function revealSelectedContacts(inspectionId) {
             const checkboxes = document.querySelectorAll('.contact-checkbox:checked');
             const personIds = Array.from(checkboxes).map(cb => cb.value).filter(id => id);
-            const revealEmail = document.getElementById('reveal-email-option')?.checked ?? true;
-            const revealPhone = document.getElementById('reveal-phone-option')?.checked ?? false;
+            const revealEmail = document.getElementById('reveal-email-option')?.checked ? true : false;
+            const revealPhone = document.getElementById('reveal-phone-option')?.checked ? true : false;
 
             if (personIds.length === 0) {
                 alert('Please select at least one contact to reveal');
@@ -2393,6 +2435,9 @@ async def osha_dashboard():
                         enrichBtn.classList.add('bg-green-100', 'text-green-700');
                         enrichBtn.innerHTML = 'Enriched (Web)';
                     }
+
+                    // Display the company data in the modal (if inspection modal is open)
+                    await loadCompanyData(inspectionId);
                 } else {
                     alert(`Error saving: ${result.error}`);
                 }
@@ -2658,6 +2703,12 @@ async def osha_dashboard():
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                                     </svg>
                                     Generate Email
+                                </button>
+                                <button onclick="openApolloEnrichmentModal(${inspectionId})" class="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 ml-2 px-2 py-1 bg-indigo-50 rounded hover:bg-indigo-100 transition-colors">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                                    </svg>
+                                    Enrich with Apollo
                                 </button>
                             </div>
                         </div>
@@ -3012,6 +3063,16 @@ async def osha_dashboard():
                 const modal = document.getElementById('company-detail-modal');
                 const content = document.getElementById('company-detail-content');
 
+                // Fetch inspection data for email generation
+                if (company.inspection_id) {
+                    try {
+                        const inspection = await fetch(`${API_BASE}/${company.inspection_id}`).then(r => r.json());
+                        currentInspection = inspection;
+                    } catch (e) {
+                        console.log('Could not load inspection data for email');
+                    }
+                }
+
                 // Reuse the displayCompanyData format but in a standalone modal
                 const data = company;
                 const websiteUrl = company.website;
@@ -3062,6 +3123,13 @@ async def osha_dashboard():
                                 </svg>
                                 Add to CRM
                             </button>
+                            <button onclick="openEmailModal(${company.inspection_id})"
+                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                </svg>
+                                Generate Email
+                            </button>
                             <button onclick="closeCompanyDetailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
                         </div>
                     </div>
@@ -3085,110 +3153,233 @@ async def osha_dashboard():
 
         function buildCompanyDetailHTML(data, websiteUrl, services, otherLocations, contacts) {
             const social = data;
+            const companyName = data.official_name || data.name;
+            const employees = data.employee_range || data.employee_count || data.employee_estimate;
+            const phone = data.contact_info?.main_phone || data.phone;
+            const email = data.contact_info?.main_email || data.email;
+            const address = data.headquarters?.address || data.address;
+            const city = data.headquarters?.city || data.city;
+            const state = data.headquarters?.state || data.state;
+            const postalCode = data.headquarters?.postal_code || data.postal_code;
+            const registration = data.business_registration || data;
+
             return `
-                <!-- Social Links -->
-                <div class="flex items-center gap-3 mb-6">
-                    ${social.linkedin_url ? `<a href="${social.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg></a>` : ''}
-                    ${social.facebook_url ? `<a href="${social.facebook_url}" target="_blank" class="text-blue-600 hover:text-blue-800" title="Facebook"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></a>` : ''}
-                    ${social.twitter_url ? `<a href="${social.twitter_url}" target="_blank" class="text-gray-800 hover:text-black" title="Twitter/X"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>` : ''}
-                    ${social.instagram_url ? `<a href="${social.instagram_url}" target="_blank" class="text-pink-600 hover:text-pink-800" title="Instagram"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg></a>` : ''}
-                    ${websiteUrl ? `<a href="${websiteUrl}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1 ml-2 px-3 py-1 bg-blue-50 rounded"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>Website</a>` : ''}
-                </div>
-
-                <!-- Basic Info -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                    ${data.industry ? `<div><p class="text-xs text-gray-500 uppercase">Industry</p><p class="text-sm font-medium">${escapeHtml(data.industry)}</p></div>` : ''}
-                    ${data.sub_industry ? `<div><p class="text-xs text-gray-500 uppercase">Sub-Industry</p><p class="text-sm font-medium">${escapeHtml(data.sub_industry)}</p></div>` : ''}
-                    ${data.employee_range || data.employee_count ? `<div><p class="text-xs text-gray-500 uppercase">Employees</p><p class="text-sm font-medium">${escapeHtml(String(data.employee_range || data.employee_count))}</p></div>` : ''}
-                    ${data.year_founded ? `<div><p class="text-xs text-gray-500 uppercase">Founded</p><p class="text-sm font-medium">${data.year_founded} (${new Date().getFullYear() - data.year_founded} years)</p></div>` : ''}
-                    ${data.business_type ? `<div><p class="text-xs text-gray-500 uppercase">Business Type</p><p class="text-sm font-medium">${escapeHtml(data.business_type)}</p></div>` : ''}
-                    ${data.registration_number ? `<div><p class="text-xs text-gray-500 uppercase">Registration #</p><p class="text-sm font-medium">${escapeHtml(data.registration_number)}</p></div>` : ''}
-                </div>
-
-                <!-- Contact Info -->
-                ${data.phone || data.email ? `
-                    <div class="border-t pt-4 mb-6">
-                        <p class="text-xs text-gray-500 uppercase mb-2">Contact Information</p>
-                        <div class="flex flex-wrap gap-6">
-                            ${data.phone ? `<a href="tel:${data.phone}" class="text-blue-600 hover:text-blue-800 flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>${escapeHtml(data.phone)}</a>` : ''}
-                            ${data.email ? `<a href="mailto:${data.email}" class="text-blue-600 hover:text-blue-800 flex items-center gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>${escapeHtml(data.email)}</a>` : ''}
-                        </div>
-                    </div>
-                ` : ''}
-
-                <!-- Address -->
-                ${data.address || data.city ? `
-                    <div class="border-t pt-4 mb-6">
-                        <p class="text-xs text-gray-500 uppercase mb-2">Headquarters</p>
-                        <p class="text-sm">${data.address ? escapeHtml(data.address) + '<br>' : ''}${[data.city, data.state, data.postal_code].filter(Boolean).map(escapeHtml).join(', ')}</p>
-                    </div>
-                ` : ''}
-
-                <!-- Description -->
-                ${data.description ? `
-                    <div class="border-t pt-4 mb-6">
-                        <p class="text-xs text-gray-500 uppercase mb-2">Description</p>
-                        <p class="text-sm text-gray-700">${escapeHtml(data.description)}</p>
-                    </div>
-                ` : ''}
-
-                <!-- Services -->
-                ${services && services.length > 0 ? `
-                    <div class="border-t pt-4 mb-6">
-                        <p class="text-xs text-gray-500 uppercase mb-2">Services</p>
-                        <div class="flex flex-wrap gap-1">${services.map(s => `<span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-800">${escapeHtml(s)}</span>`).join('')}</div>
-                    </div>
-                ` : ''}
-
-                <!-- Key Personnel -->
-                ${contacts && contacts.length > 0 ? (() => {
-                    // Sort contacts: those with email/phone first, then others
-                    const withContact = contacts.filter(p => p.email || p.phone);
-                    const withoutContact = contacts.filter(p => !p.email && !p.phone);
-
-                    const renderContact = (p, highlighted = false) => `
-                        <div class="${highlighted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'} rounded-lg p-3 border">
-                            <div class="flex items-start justify-between">
-                                <div>
-                                    <p class="text-sm font-semibold">${escapeHtml(p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' '))}</p>
-                                    ${p.title ? `<p class="text-xs text-gray-500">${escapeHtml(p.title)}</p>` : ''}
-                                </div>
-                                ${p.linkedin_url ? `<a href="${p.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900"><svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg></a>` : ''}
-                            </div>
-                            ${(p.email || p.phone) ? `
-                                <div class="mt-2 flex flex-wrap gap-3 text-xs">
-                                    ${p.email ? `<a href="mailto:${escapeHtml(p.email)}" class="text-blue-600 hover:text-blue-800">${escapeHtml(p.email)}</a>` : ''}
-                                    ${p.phone ? `<a href="tel:${escapeHtml(p.phone)}" class="text-blue-600 hover:text-blue-800">${escapeHtml(p.phone)}</a>` : ''}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
-
-                    return `
-                    <div class="border-t pt-4 mb-6">
-                        <p class="text-xs text-gray-500 uppercase mb-3">Key Personnel</p>
-                        ${withContact.length > 0 ? `
-                            <p class="text-xs font-medium text-green-700 mb-2 flex items-center gap-1">
+                <div class="space-y-6">
+                    <!-- Social Links Row -->
+                    <div class="flex items-center gap-3 flex-wrap">
+                        ${social.linkedin_url ? `
+                            <a href="${social.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
+                            </a>
+                        ` : ''}
+                        ${social.facebook_url ? `
+                            <a href="${social.facebook_url}" target="_blank" class="text-blue-600 hover:text-blue-800" title="Facebook">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                            </a>
+                        ` : ''}
+                        ${social.twitter_url ? `
+                            <a href="${social.twitter_url}" target="_blank" class="text-gray-800 hover:text-black" title="Twitter/X">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                            </a>
+                        ` : ''}
+                        ${social.instagram_url ? `
+                            <a href="${social.instagram_url}" target="_blank" class="text-pink-600 hover:text-pink-800" title="Instagram">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+                            </a>
+                        ` : ''}
+                        ${social.youtube_url ? `
+                            <a href="${social.youtube_url}" target="_blank" class="text-red-600 hover:text-red-800" title="YouTube">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                            </a>
+                        ` : ''}
+                        ${websiteUrl ? `
+                            <a href="${websiteUrl}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 ml-2 px-2 py-1 bg-blue-50 rounded">
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                                 </svg>
-                                Contacts with Email/Phone (${withContact.length})
-                            </p>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-                                ${withContact.map(p => renderContact(p, true)).join('')}
+                                Website
+                            </a>
+                        ` : ''}
+                    </div>
+
+                    <!-- Basic Info Grid -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        ${companyName ? `
+                            <div class="col-span-2">
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Official Name</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(companyName)}</p>
                             </div>
                         ` : ''}
-                        ${withoutContact.length > 0 ? `
-                            <p class="text-xs font-medium text-gray-500 mb-2 ${withContact.length > 0 ? 'mt-4 pt-3 border-t' : ''}">
-                                Other Personnel (${withoutContact.length})
-                            </p>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                ${withoutContact.map(p => renderContact(p, false)).join('')}
+                        ${data.industry ? `
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Industry</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(data.industry)}</p>
+                            </div>
+                        ` : ''}
+                        ${data.sub_industry ? `
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Sub-Industry</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(data.sub_industry)}</p>
+                            </div>
+                        ` : ''}
+                        ${employees ? `
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Employees</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(String(employees))}</p>
+                            </div>
+                        ` : ''}
+                        ${data.year_founded ? `
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Founded</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(String(data.year_founded))} (${new Date().getFullYear() - data.year_founded} years)</p>
+                            </div>
+                        ` : ''}
+                        ${registration.business_type || data.business_type ? `
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Business Type</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(registration.business_type || data.business_type)}</p>
+                            </div>
+                        ` : ''}
+                        ${registration.registration_number || data.registration_number ? `
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Registration #</p>
+                                <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(registration.registration_number || data.registration_number)}</p>
                             </div>
                         ` : ''}
                     </div>
-                    `;
-                })() : ''}
+
+                    <!-- Contact Info Section -->
+                    ${phone || email ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact Information</p>
+                            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                ${phone ? `
+                                    <div>
+                                        <p class="text-xs text-gray-400">Phone</p>
+                                        <a href="tel:${escapeHtml(phone)}" class="text-sm font-medium text-blue-600 hover:text-blue-800">${escapeHtml(phone)}</a>
+                                    </div>
+                                ` : ''}
+                                ${email ? `
+                                    <div>
+                                        <p class="text-xs text-gray-400">Email</p>
+                                        <a href="mailto:${escapeHtml(email)}" class="text-sm font-medium text-blue-600 hover:text-blue-800">${escapeHtml(email)}</a>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Address Section -->
+                    ${address || city ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Headquarters</p>
+                            <p class="text-sm text-gray-900">
+                                ${address ? escapeHtml(address) + '<br>' : ''}
+                                ${[city, state, postalCode].filter(Boolean).map(escapeHtml).join(', ')}
+                            </p>
+                        </div>
+                    ` : ''}
+
+                    <!-- Other Locations -->
+                    ${otherLocations && otherLocations.length > 0 ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Other Locations</p>
+                            <div class="space-y-2">
+                                ${otherLocations.map(loc => `
+                                    <div class="text-sm text-gray-700 flex items-start gap-2">
+                                        <svg class="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        </svg>
+                                        <span>${escapeHtml(loc.address || loc)}${loc.type ? ` <span class="text-gray-400">(${escapeHtml(loc.type)})</span>` : ''}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Description -->
+                    ${data.description ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Description</p>
+                            <p class="text-sm text-gray-700">${escapeHtml(data.description)}</p>
+                        </div>
+                    ` : ''}
+
+                    <!-- Services -->
+                    ${services && services.length > 0 ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Services</p>
+                            <div class="flex flex-wrap gap-1">
+                                ${services.map(s => `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">${escapeHtml(s)}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Key Personnel / Contacts -->
+                    ${contacts && contacts.length > 0 ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-3">Key Personnel</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                ${contacts.map(p => `
+                                    <div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                                        <div class="flex items-start justify-between">
+                                            <div>
+                                                <p class="text-sm font-semibold text-gray-900">${escapeHtml(p.full_name || p.name || [p.first_name, p.last_name].filter(Boolean).join(' '))}</p>
+                                                ${p.title ? `<p class="text-xs text-gray-500">${escapeHtml(p.title)}</p>` : ''}
+                                            </div>
+                                            ${p.linkedin_url ? `
+                                                <a href="${p.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn Profile">
+                                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
+                                                </a>
+                                            ` : ''}
+                                        </div>
+                                        ${(p.email || p.phone) ? `
+                                            <div class="mt-2 flex flex-wrap gap-3 text-xs">
+                                                ${p.email ? `
+                                                    <a href="mailto:${escapeHtml(p.email)}" class="text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                                        </svg>
+                                                        ${escapeHtml(p.email)}
+                                                    </a>
+                                                ` : ''}
+                                                ${p.phone ? `
+                                                    <a href="tel:${escapeHtml(p.phone)}" class="text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
+                                                        </svg>
+                                                        ${escapeHtml(p.phone)}
+                                                    </a>
+                                                ` : ''}
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Certifications -->
+                    ${data.certifications && data.certifications.length > 0 ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Certifications</p>
+                            <div class="flex flex-wrap gap-1">
+                                ${data.certifications.map(c => `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">${escapeHtml(c)}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Safety Programs -->
+                    ${data.safety_programs && data.safety_programs.length > 0 ? `
+                        <div class="border-t border-gray-100 pt-4">
+                            <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Safety Programs</p>
+                            <div class="flex flex-wrap gap-1">
+                                ${data.safety_programs.map(s => `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">${escapeHtml(s)}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
             `;
         }
 
@@ -3217,7 +3408,7 @@ async def osha_dashboard():
                         const countEl = document.getElementById('enriched-count');
                         if (countEl) {
                             const currentText = countEl.textContent;
-                            const match = currentText.match(/\\((\\d+)/);
+                            const match = currentText.match(/\((\d+)/);
                             if (match) {
                                 const newCount = parseInt(match[1]) - 1;
                                 countEl.textContent = `(${newCount} companies)`;
@@ -3276,6 +3467,21 @@ async def osha_dashboard():
             return types[code] || 'an inspection';
         }
 
+        // Normalize company names that are ALL CAPS to Title Case
+        function normalizeCompanyName(name) {
+            if (!name) return name;
+            // Check if name is mostly uppercase (more than 80% caps)
+            const upperCount = (name.match(/[A-Z]/g) || []).length;
+            const letterCount = (name.match(/[a-zA-Z]/g) || []).length;
+            if (letterCount > 0 && upperCount / letterCount > 0.8) {
+                // Convert to title case, preserving common abbreviations
+                return name.toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase())
+                    .replace(/\\b(Llc|Inc|Corp|Ltd|Co|Lp|Llp)\\b/gi, m => m.toUpperCase())
+                    .replace(/\\b(Usa|Us)\\b/gi, m => m.toUpperCase());
+            }
+            return name;
+        }
+
         async function openEmailModal(inspectionId) {
             // Get inspection and company data
             const inspection = currentInspection;
@@ -3300,7 +3506,7 @@ async def osha_dashboard():
             }
 
             // Format data for email
-            const companyName = inspection.estab_name || 'your company';
+            const companyName = normalizeCompanyName(inspection.estab_name) || 'your company';
             const inspectionDate = inspection.open_date ? new Date(inspection.open_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'recently';
             const inspectionReason = getInspectionTypeName(inspection.insp_type);
 
@@ -3313,7 +3519,7 @@ async def osha_dashboard():
 
 I noticed that ${companyName} was visited by OSHA on ${inspectionDate} regarding ${inspectionReason}.
 
-Dealing with OSHA can be stressful, especially when you're trying to run a business. At TSG Safety, we specialize in helping companies like yours with OSHA compliance and workplace safety—whether that's responding to citations, preparing for follow-up inspections, or building safety programs that prevent future issues.
+Dealing with OSHA can be stressful, especially when you're trying to run a business. At TSG Safety, we specialize in helping companies like yours with OSHA compliance and workplace safety - whether that's responding to citations, preparing for follow-up inspections, or building safety programs that prevent future issues.
 
 If you'd like to chat about your situation, I'm happy to help.`;
 
@@ -3774,3 +3980,5 @@ If you'd like to chat about your situation, I'm happy to help.`;
 </body>
 </html>
 """
+
+

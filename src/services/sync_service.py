@@ -32,6 +32,7 @@ TARGET_STATES = {
 
 # Alias for backwards compatibility
 SOUTHEAST_STATES = TARGET_STATES
+MIN_INSPECTION_DATE = datetime(2023, 1, 1).date()
 
 
 class LogCollector:
@@ -92,6 +93,8 @@ class SyncService:
         try:
             # Calculate since_date from days_back
             since_date = (datetime.now() - timedelta(days=days_back)).date()
+            if since_date < MIN_INSPECTION_DATE:
+                since_date = MIN_INSPECTION_DATE
             logs.log(f"Fetching inspections with open_date > {since_date}")
 
             # Check API key
@@ -110,6 +113,10 @@ class SyncService:
                     since_date=since_date,
                     max_requests=max_requests,
                     log_collector=logs  # Pass log collector to client
+                )
+                raw_inspections.sort(
+                    key=lambda r: self.osha_client.parse_inspection(r).get("open_date") or MIN_INSPECTION_DATE,
+                    reverse=True,
                 )
                 stats["fetched"] = len(raw_inspections)
                 logs.log(f"API returned {len(raw_inspections)} total inspections")
@@ -181,9 +188,9 @@ class SyncService:
         if not activity_nr:
             raise ValueError("Inspection missing activity_nr")
 
-        # Filter: Only accept inspections from 2020 onwards
+        # Filter: Only accept inspections from 2023 onwards
         open_date = parsed.get("open_date")
-        if open_date and open_date.year < 2020:
+        if open_date and open_date.year < 2023:
             return False, False, "old"
 
         # Filter: Only accept inspections from southeast states

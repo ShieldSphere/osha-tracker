@@ -15,6 +15,7 @@ from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy import select, func
+from sqlalchemy.dialects.postgresql import insert
 
 from src.database.models import Inspection, Violation
 from src.database.connection import get_db_session
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 SOUTHEAST_STATES = {
     "AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "VA", "WV"
 }
+MIN_INSPECTION_DATE = date(2023, 1, 1)
 
 
 class APISyncService:
@@ -45,20 +47,6 @@ class APISyncService:
                 select(func.max(Inspection.open_date))
             ).scalar()
             return result
-
-    def get_existing_activity_nrs(self) -> set:
-        """Get all existing activity_nr values from database."""
-        with get_db_session() as db:
-            result = db.execute(select(Inspection.activity_nr)).scalars().all()
-            return set(result)
-
-    def get_existing_violation_keys(self) -> set:
-        """Get all existing (activity_nr, citation_id) pairs."""
-        with get_db_session() as db:
-            result = db.execute(
-                select(Violation.activity_nr, Violation.citation_id)
-            ).all()
-            return {f"{r[0]}_{r[1]}" for r in result}
 
     async def sync_new_records(
         self,
@@ -96,6 +84,9 @@ class APISyncService:
             # No data in database - use 90 days ago as default
             max_open_date = date.today() - timedelta(days=90)
             logger.warning(f"No existing data found, using {max_open_date} as cutoff")
+        elif max_open_date < MIN_INSPECTION_DATE:
+            max_open_date = MIN_INSPECTION_DATE
+            logger.info(f"Using minimum inspection cutoff: {MIN_INSPECTION_DATE}")
 
         logger.info("=" * 60)
         logger.info("API SYNC: Fetching new records")
@@ -124,84 +115,48 @@ class APISyncService:
 
         logger.info(f"API returned {len(raw_inspections)} inspections with open_date > {max_open_date}")
 
-        # Step 3: Filter and insert new inspections
-        existing_nrs = self.get_existing_activity_nrs()
-        new_activity_nrs = []
+        # Step 3: Filter and bulk insert new inspections
+        candidate_map: Dict[str, Dict] = {}
+        for raw in raw_inspections:
+            try:
+                parsed = self.client.parse_inspection(raw)
+                activity_nr = parsed.get("activity_nr")
+                if not activity_nr:
+                    continue
 
-        with get_db_session() as db:
-            for raw in raw_inspections:
-                try:
-                    parsed = self.client.parse_inspection(raw)
-                    activity_nr = parsed.get("activity_nr")
+                open_date = parsed.get("open_date")
+                if open_date and open_date < MIN_INSPECTION_DATE:
+                    stats["skipped_old"] += 1
+                    continue
 
-                    if not activity_nr:
-                        continue
+                # Filter: SE states only
+                site_state = (parsed.get("site_state") or "").upper()
+                if site_state not in SOUTHEAST_STATES:
+                    stats["skipped_non_se"] += 1
+                    continue
 
-                    # Skip if already exists
-                    if activity_nr in existing_nrs:
-                        stats["skipped_exists"] += 1
-                        continue
+                parsed["estab_name"] = parsed.get("estab_name") or "Unknown"
+                candidate_map[activity_nr] = parsed
+            except Exception as e:
+                logger.error(f"Error processing inspection: {e}")
+                stats["errors"].append(f"Inspection parse error: {str(e)}")
 
-                    # Filter: SE states only
-                    site_state = (parsed.get("site_state") or "").upper()
-                    if site_state not in SOUTHEAST_STATES:
-                        stats["skipped_non_se"] += 1
-                        continue
+        candidate_inspections = list(candidate_map.values())
+        candidate_inspections.sort(key=lambda r: r.get("open_date") or date.min, reverse=True)
+        new_activity_nrs: List[str] = []
+        if candidate_inspections:
+            with get_db_session() as db:
+                insert_stmt = (
+                    insert(Inspection)
+                    .values(candidate_inspections)
+                    .on_conflict_do_nothing(index_elements=["activity_nr"])
+                    .returning(Inspection.activity_nr)
+                )
+                inserted = db.execute(insert_stmt).scalars().all()
+                new_activity_nrs = inserted
 
-                    # Add new inspection
-                    inspection = Inspection(
-                        activity_nr=activity_nr,
-                        reporting_id=parsed.get("reporting_id"),
-                        state_flag=parsed.get("state_flag"),
-                        estab_name=parsed.get("estab_name") or "Unknown",
-                        site_address=parsed.get("site_address"),
-                        site_city=parsed.get("site_city"),
-                        site_state=parsed.get("site_state"),
-                        site_zip=parsed.get("site_zip"),
-                        mail_street=parsed.get("mail_street"),
-                        mail_city=parsed.get("mail_city"),
-                        mail_state=parsed.get("mail_state"),
-                        mail_zip=parsed.get("mail_zip"),
-                        open_date=parsed.get("open_date"),
-                        case_mod_date=parsed.get("case_mod_date"),
-                        close_conf_date=parsed.get("close_conf_date"),
-                        close_case_date=parsed.get("close_case_date"),
-                        sic_code=parsed.get("sic_code"),
-                        naics_code=parsed.get("naics_code"),
-                        insp_type=parsed.get("insp_type"),
-                        insp_scope=parsed.get("insp_scope"),
-                        why_no_insp=parsed.get("why_no_insp"),
-                        owner_type=parsed.get("owner_type"),
-                        owner_code=parsed.get("owner_code"),
-                        adv_notice=parsed.get("adv_notice"),
-                        safety_hlth=parsed.get("safety_hlth"),
-                        union_status=parsed.get("union_status"),
-                        safety_manuf=parsed.get("safety_manuf"),
-                        safety_const=parsed.get("safety_const"),
-                        safety_marit=parsed.get("safety_marit"),
-                        health_manuf=parsed.get("health_manuf"),
-                        health_const=parsed.get("health_const"),
-                        health_marit=parsed.get("health_marit"),
-                        migrant=parsed.get("migrant"),
-                        nr_in_estab=parsed.get("nr_in_estab"),
-                        host_est_key=parsed.get("host_est_key"),
-                        load_dt=parsed.get("load_dt"),
-                    )
-                    db.add(inspection)
-                    existing_nrs.add(activity_nr)
-                    new_activity_nrs.append(activity_nr)
-                    stats["new_inspections_added"] += 1
-
-                    logger.info(
-                        f"NEW: {activity_nr} - {parsed.get('estab_name')} "
-                        f"({site_state}) - {parsed.get('open_date')}"
-                    )
-
-                except Exception as e:
-                    logger.error(f"Error processing inspection: {e}")
-                    stats["errors"].append(f"Inspection parse error: {str(e)}")
-
-            db.commit()
+            stats["new_inspections_added"] = len(new_activity_nrs)
+            stats["skipped_exists"] = max(len(candidate_inspections) - len(new_activity_nrs), 0)
 
         logger.info(f"Added {stats['new_inspections_added']} new inspections")
 
@@ -225,62 +180,34 @@ class APISyncService:
                     stats["errors"].append(f"Violation fetch error: {str(e)}")
                     raw_violations = []
 
-                # Insert violations
-                existing_viol_keys = self.get_existing_violation_keys()
+                # Insert violations in batches using upsert
+                violation_records: List[Dict] = []
+                for raw in raw_violations:
+                    try:
+                        parsed = self.client.parse_violation(raw)
+                        activity_nr = parsed.get("activity_nr")
+                        citation_id = parsed.get("citation_id")
 
-                with get_db_session() as db:
-                    for raw in raw_violations:
-                        try:
-                            parsed = self.client.parse_violation(raw)
-                            activity_nr = parsed.get("activity_nr")
-                            citation_id = parsed.get("citation_id")
+                        if not activity_nr or not citation_id:
+                            continue
 
-                            if not activity_nr or not citation_id:
-                                continue
+                        violation_records.append(parsed)
+                    except Exception as e:
+                        logger.error(f"Error processing violation: {e}")
+                        stats["errors"].append(f"Violation parse error: {str(e)}")
 
-                            key = f"{activity_nr}_{citation_id}"
-                            if key in existing_viol_keys:
-                                continue
-
-                            violation = Violation(
-                                activity_nr=activity_nr,
-                                citation_id=citation_id,
-                                delete_flag=parsed.get("delete_flag"),
-                                standard=parsed.get("standard"),
-                                viol_type=parsed.get("viol_type"),
-                                issuance_date=parsed.get("issuance_date"),
-                                abate_date=parsed.get("abate_date"),
-                                abate_complete=parsed.get("abate_complete"),
-                                current_penalty=parsed.get("current_penalty"),
-                                initial_penalty=parsed.get("initial_penalty"),
-                                contest_date=parsed.get("contest_date"),
-                                final_order_date=parsed.get("final_order_date"),
-                                nr_instances=parsed.get("nr_instances"),
-                                nr_exposed=parsed.get("nr_exposed"),
-                                rec=parsed.get("rec"),
-                                gravity=parsed.get("gravity"),
-                                emphasis=parsed.get("emphasis"),
-                                hazcat=parsed.get("hazcat"),
-                                fta_insp_nr=parsed.get("fta_insp_nr"),
-                                fta_issuance_date=parsed.get("fta_issuance_date"),
-                                fta_penalty=parsed.get("fta_penalty"),
-                                fta_contest_date=parsed.get("fta_contest_date"),
-                                fta_final_order_date=parsed.get("fta_final_order_date"),
-                                hazsub1=parsed.get("hazsub1"),
-                                hazsub2=parsed.get("hazsub2"),
-                                hazsub3=parsed.get("hazsub3"),
-                                hazsub4=parsed.get("hazsub4"),
-                                hazsub5=parsed.get("hazsub5"),
+                if violation_records:
+                    batch_size = 1000
+                    with get_db_session() as db:
+                        for i in range(0, len(violation_records), batch_size):
+                            batch = violation_records[i:i + batch_size]
+                            insert_stmt = (
+                                insert(Violation)
+                                .values(batch)
+                                .on_conflict_do_nothing(index_elements=["activity_nr", "citation_id"])
                             )
-                            db.add(violation)
-                            existing_viol_keys.add(key)
-                            stats["new_violations_added"] += 1
-
-                        except Exception as e:
-                            logger.error(f"Error processing violation: {e}")
-                            stats["errors"].append(f"Violation parse error: {str(e)}")
-
-                    db.commit()
+                            result = db.execute(insert_stmt)
+                            stats["new_violations_added"] += result.rowcount or 0
 
                 logger.info(f"Added {stats['new_violations_added']} new violations")
 

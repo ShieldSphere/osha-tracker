@@ -1,4 +1,4 @@
-"""EPA Enforcement Tracker Dashboard page."""
+﻿"""EPA Enforcement Tracker Dashboard page."""
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -40,15 +40,15 @@ async def epa_dashboard():
 </head>
 <body class="bg-gray-100 min-h-screen">
     <nav class="bg-gray-900 text-white shadow-lg">
-        <div class="container mx-auto px-4">
+        <div class="max-w-7xl mx-auto px-4">
             <div class="flex justify-between items-center h-16">
                 <div class="flex items-center space-x-8">
                     <h1 class="text-xl font-bold">TSG Safety</h1>
                     <div class="flex space-x-1">
-                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
-                        <a href="/osha" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">OSHA</a>
-                        <a href="/epa" class="px-3 py-2 rounded-md text-sm font-medium bg-green-600 text-white">EPA</a>
-                        <a href="/crm" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">CRM</a>
+                        <a href="/" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
+                        <a href="/osha" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">OSHA</a>
+                        <a href="/epa" class="px-4 py-2 rounded-md text-sm font-medium bg-green-600 text-white">EPA</a>
+                        <a href="/crm" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">CRM</a>
                     </div>
                 </div>
                 <div class="flex items-center gap-4">
@@ -61,7 +61,11 @@ async def epa_dashboard():
         </div>
     </nav>
 
-    <main class="container mx-auto p-6">
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <div class="mb-6">
+            <h2 class="text-2xl font-bold text-gray-800">EPA Enforcement</h2>
+            <p class="text-gray-600 mt-1">Track enforcement cases, penalties, and compliance status</p>
+        </div>
         <div class="flex flex-col lg:flex-row gap-6">
             <!-- Left Sidebar - Stats Cards -->
             <div class="lg:w-48 flex-shrink-0">
@@ -621,3 +625,4 @@ async def epa_dashboard():
 </body>
 </html>
 """
+

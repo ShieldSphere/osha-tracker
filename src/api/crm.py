@@ -219,6 +219,29 @@ async def list_prospects(
     count_query = select(func.count()).select_from(query.subquery())
     total = db.execute(count_query).scalar()
 
+    activity_counts = (
+        select(
+            Activity.prospect_id,
+            func.count(Activity.id).label("activity_count"),
+        )
+        .group_by(Activity.prospect_id)
+        .subquery()
+    )
+    callback_counts = (
+        select(
+            Callback.prospect_id,
+            func.count(Callback.id).label("callback_count"),
+        )
+        .where(Callback.status == CallbackStatus.PENDING)
+        .group_by(Callback.prospect_id)
+        .subquery()
+    )
+    query = (
+        query.outerjoin(activity_counts, activity_counts.c.prospect_id == Prospect.id)
+        .outerjoin(callback_counts, callback_counts.c.prospect_id == Prospect.id)
+        .add_columns(activity_counts.c.activity_count, callback_counts.c.callback_count)
+    )
+
     # Apply sorting
     sort_column = getattr(Prospect, sort_by, Prospect.updated_at)
     if sort_desc:
@@ -231,22 +254,15 @@ async def list_prospects(
     query = query.offset(offset).limit(page_size)
 
     # Execute query
-    prospects = db.execute(query).scalars().unique().all()
+    rows = db.execute(query).unique().all()
 
     # Build response items with inspection data
     items = []
-    for prospect in prospects:
+    for row in rows:
+        prospect = row[0]
+        activity_count = row[1] or 0
+        callback_count = row[2] or 0
         insp = prospect.inspection
-
-        # Count activities and callbacks
-        activity_count = db.execute(
-            select(func.count(Activity.id)).where(Activity.prospect_id == prospect.id)
-        ).scalar()
-        callback_count = db.execute(
-            select(func.count(Callback.id)).where(
-                and_(Callback.prospect_id == prospect.id, Callback.status == CallbackStatus.PENDING)
-            )
-        ).scalar()
 
         items.append(ProspectResponse(
             id=prospect.id,

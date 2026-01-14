@@ -1,4 +1,4 @@
-"""
+﻿"""
 Violation Sync Service - Smart strategy for tracking new violations on existing inspections.
 
 Key Strategy:
@@ -10,16 +10,18 @@ Key Strategy:
 import logging
 import asyncio
 from datetime import datetime, date, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, DefaultDict, Set
 from sqlalchemy.orm import Session
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_, func, exists
+from collections import defaultdict
 
 from src.database.models import Inspection, Violation
 from src.database.connection import get_db_session
-from src.services.osha_client import OSHAClient
+from src.services.osha_client import OSHAClient, ACTIVITY_NR_BATCH_SIZE, MAX_RECORDS_PER_REQUEST
 from src.services.sync_service import SOUTHEAST_STATES, LogCollector
 
 logger = logging.getLogger(__name__)
+MIN_INSPECTION_DATE = date(2023, 1, 1)
 
 
 class ViolationSyncService:
@@ -31,26 +33,33 @@ class ViolationSyncService:
     async def sync_violations_smart(
         self,
         max_inspections_to_check: int = 3,  # Default 3 for Vercel timeout
-        rate_limit_delay: float = 1.5  # Reduced for serverless
+        rate_limit_delay: float = 1.5,  # Reduced for serverless
+        days_back: int = 180,
+        min_days_between_checks: int = 7,
+        max_requests: int = 10,
     ) -> Dict[str, Any]:
         """
-        Smart violation sync: Check inspections most likely to have new violations.
+        Smart violation sync: Check recent inspections for new violations.
 
         Strategy:
-        1. Prioritize inspections opened 3-9 months ago (citation window)
-        2. Check inspections with no violations yet
-        3. Re-check inspections with violations if they're not "closed"
-        4. Skip inspections older than 12 months with violations (unlikely to change)
+        1. Only check inspections within the last N days (default 180)
+        2. Prioritize inspections with no violations or stale last check
+        3. Batch API calls to reduce rate limiting
+        4. Keep each run short for Vercel timeouts
 
         Args:
             max_inspections_to_check: Limit to avoid rate limiting (default 3 for Vercel)
             rate_limit_delay: Seconds between API calls
+            days_back: How far back to check inspections (default 180 days)
+            min_days_between_checks: Skip inspections checked within this window
+            max_requests: Max API requests per run
 
         Returns:
             Sync statistics with logs
         """
         logs = LogCollector()
         logs.log(f"Starting violation sync (max_inspections={max_inspections_to_check}, delay={rate_limit_delay}s)")
+        logs.log(f"Window: last {days_back} days, min_days_between_checks={min_days_between_checks}, max_requests={max_requests}")
 
         stats = {
             "inspections_checked": 0,
@@ -65,32 +74,38 @@ class ViolationSyncService:
         try:
             with get_db_session() as db:
                 # Get candidate inspections to check
-                candidates = self._get_candidate_inspections(db, max_inspections_to_check)
+                candidates = self._get_candidate_inspections_recent(
+                    db,
+                    limit=max_inspections_to_check,
+                    days_back=days_back,
+                    min_days_between_checks=min_days_between_checks,
+                )
                 logs.log(f"Found {len(candidates)} candidate inspections to check")
 
-                for i, inspection in enumerate(candidates):
+                activity_nrs = [c.activity_nr for c in candidates]
+                violations_by_activity, processed_activity_nrs = await self._fetch_violations_for_activity_batches(
+                    activity_nrs=activity_nrs,
+                    max_requests=max_requests,
+                    rate_limit_delay=rate_limit_delay,
+                    log_collector=logs,
+                )
+
+                for inspection in candidates:
+                    if inspection.activity_nr not in processed_activity_nrs:
+                        stats["skipped"] += 1
+                        continue
+
                     try:
-                        if i > 0:  # Don't delay before first request
-                            await asyncio.sleep(rate_limit_delay)
-
-                        logs.log(f"Checking inspection {inspection.activity_nr} ({inspection.estab_name})")
-
-                        # Fetch violations from API
-                        api_violations = await self.osha_client.fetch_violations_for_inspection(
-                            inspection.activity_nr
-                        )
-
+                        api_violations = violations_by_activity.get(inspection.activity_nr, [])
                         stats["inspections_checked"] += 1
 
                         if not api_violations:
                             logs.log(f"  No violations found for {inspection.activity_nr}")
-                            # Update last check timestamp
                             self._update_last_violation_check(db, inspection)
                             continue
 
                         logs.log(f"  Found {len(api_violations)} violations from API")
 
-                        # Process violations
                         new_count, updated_count, had_new = await self._process_violations(
                             db, inspection, api_violations
                         )
@@ -101,17 +116,15 @@ class ViolationSyncService:
                         if had_new:
                             stats["inspections_with_new_violations"] += 1
                             logs.log(
-                                f"  ✓ NEW: {new_count} new violations for {inspection.estab_name}"
+                                f"  NEW: {new_count} new violations for {inspection.estab_name}"
                             )
 
-                            # Flag inspection with new violations
                             inspection.new_violations_detected = True
                             inspection.new_violations_count = new_count
                             inspection.new_violations_date = datetime.utcnow()
                         else:
                             logs.log(f"  No new violations (updated {updated_count})")
 
-                        # Update inspection last check and penalties
                         self._update_inspection_penalties(db, inspection)
                         self._update_last_violation_check(db, inspection)
 
@@ -130,113 +143,110 @@ class ViolationSyncService:
         stats["logs"] = logs.get_logs()
         return stats
 
-    def _get_candidate_inspections(
+    def _get_candidate_inspections_recent(
         self,
         db: Session,
-        limit: int
+        limit: int,
+        days_back: int,
+        min_days_between_checks: int,
     ) -> List[Inspection]:
         """
-        Get inspections that are most likely to have new violations.
-
-        Priority order:
-        1. Inspections opened 3-9 months ago with NO violations yet (highest priority)
-        2. Inspections opened 1-12 months ago with violations but case not closed
-        3. Inspections never checked for violations (or not checked recently)
+        Get recent inspections likely to have new violations.
 
         Args:
             db: Database session
             limit: Maximum number to return
+            days_back: Only check inspections within this window
+            min_days_between_checks: Skip inspections checked recently
 
         Returns:
             List of Inspection objects
         """
         today = date.today()
+        cutoff_open = max(today - timedelta(days=days_back), MIN_INSPECTION_DATE)
+        check_cutoff = datetime.utcnow() - timedelta(days=min_days_between_checks)
 
-        # Date ranges for prioritization
-        nine_months_ago = today - timedelta(days=270)
-        six_months_ago = today - timedelta(days=180)
-        three_months_ago = today - timedelta(days=90)
-        one_month_ago = today - timedelta(days=30)
-        twelve_months_ago = today - timedelta(days=365)
-
-        # Priority 1: Inspections in citation window (3-9 months) with no violations
-        # Filter to southeast states only
-        query_priority_1 = (
-            select(Inspection)
-            .outerjoin(Violation, Inspection.activity_nr == Violation.activity_nr)
-            .where(
-                and_(
-                    Inspection.open_date >= nine_months_ago,
-                    Inspection.open_date <= three_months_ago,
-                    Inspection.site_state.in_(SOUTHEAST_STATES),
-                    Violation.id == None  # No violations yet
-                )
-            )
-            .group_by(Inspection.id)
-            .order_by(Inspection.open_date.desc())
-            .limit(limit // 2)  # Reserve half the slots for priority 1
+        no_violations = ~exists(
+            select(Violation.id).where(Violation.activity_nr == Inspection.activity_nr)
         )
 
-        priority_1 = db.execute(query_priority_1).scalars().all()
-
-        # Priority 2: Recent inspections WITH violations but case not closed
-        # (might get more violations added) - Southeast states only
-        query_priority_2 = (
+        base_query = (
             select(Inspection)
-            .join(Violation, Inspection.activity_nr == Violation.activity_nr)
             .where(
                 and_(
-                    Inspection.open_date >= twelve_months_ago,
-                    Inspection.open_date <= one_month_ago,
+                    Inspection.open_date >= cutoff_open,
                     Inspection.site_state.in_(SOUTHEAST_STATES),
                     or_(
-                        Inspection.close_case_date == None,
-                        Inspection.close_case_date > six_months_ago
-                    )
+                        Inspection.last_violation_check.is_(None),
+                        Inspection.last_violation_check < check_cutoff,
+                        no_violations,
+                    ),
                 )
             )
-            .group_by(Inspection.id)
             .order_by(Inspection.open_date.desc())
-            .limit(limit // 4)
+            .limit(limit)
         )
 
-        priority_2 = db.execute(query_priority_2).scalars().all()
-
-        # Priority 3: Inspections that haven't been checked recently
-        # Southeast states only
-        thirty_days_ago = today - timedelta(days=30)
-
-        # For now, just fill remaining slots with recent inspections
-        remaining_slots = limit - len(priority_1) - len(priority_2)
-        if remaining_slots > 0:
-            existing_ids = {i.id for i in priority_1 + priority_2}
-
-            query_priority_3 = (
-                select(Inspection)
-                .where(
-                    and_(
-                        Inspection.open_date >= twelve_months_ago,
-                        Inspection.site_state.in_(SOUTHEAST_STATES),
-                        ~Inspection.id.in_(existing_ids) if existing_ids else True
-                    )
-                )
-                .order_by(Inspection.open_date.desc())
-                .limit(remaining_slots)
-            )
-
-            priority_3 = db.execute(query_priority_3).scalars().all()
-        else:
-            priority_3 = []
-
-        # Combine and return
-        candidates = priority_1 + priority_2 + priority_3
+        candidates = db.execute(base_query).scalars().all()
         logger.info(
-            f"Selected SE state candidates: {len(priority_1)} priority-1 (citation window, no viols), "
-            f"{len(priority_2)} priority-2 (open cases with viols), "
-            f"{len(priority_3)} priority-3 (other recent)"
+            f"Selected SE state candidates: {len(candidates)} within last {days_back} days"
         )
-
         return candidates
+
+    async def _fetch_violations_for_activity_batches(
+        self,
+        activity_nrs: List[str],
+        max_requests: int,
+        rate_limit_delay: float,
+        log_collector: Optional[LogCollector] = None,
+    ) -> Tuple[DefaultDict[str, List[Dict[str, Any]]], Set[str]]:
+        """Fetch violations for activity numbers in batches with pagination."""
+        violations_by_activity: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+        processed_activity_nrs: Set[str] = set()
+
+        if not activity_nrs:
+            return violations_by_activity, processed_activity_nrs
+
+        batches = [
+            activity_nrs[i:i + ACTIVITY_NR_BATCH_SIZE]
+            for i in range(0, len(activity_nrs), ACTIVITY_NR_BATCH_SIZE)
+        ]
+
+        requests_made = 0
+        for batch_num, batch_nrs in enumerate(batches):
+            if requests_made >= max_requests:
+                break
+
+            offset = 0
+            while requests_made < max_requests:
+                violations = await self.osha_client.fetch_violations_for_activity_nrs(
+                    activity_nrs=batch_nrs,
+                    limit=MAX_RECORDS_PER_REQUEST,
+                    offset=offset,
+                    log_collector=log_collector,
+                )
+                requests_made += 1
+
+                if not violations:
+                    processed_activity_nrs.update(batch_nrs)
+                    break
+
+                for raw in violations:
+                    activity_nr = str(raw.get("activity_nr", ""))
+                    if activity_nr:
+                        violations_by_activity[activity_nr].append(raw)
+
+                offset += len(violations)
+                if len(violations) < MAX_RECORDS_PER_REQUEST:
+                    processed_activity_nrs.update(batch_nrs)
+                    break
+
+                await asyncio.sleep(rate_limit_delay)
+
+            if batch_num < len(batches) - 1 and requests_made < max_requests:
+                await asyncio.sleep(rate_limit_delay)
+
+        return violations_by_activity, processed_activity_nrs
 
     async def _process_violations(
         self,

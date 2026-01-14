@@ -1,5 +1,15 @@
 {
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
+  ],
+  "crons": [
+    {
+      "path": "/api/inspections/cron/inspections?max_requests=6",
+      "schedule": "0 */3 * * *"
+    },
+    {
+      "path": "/api/inspections/cron/violations?days_back=180&min_days_between_checks=7&max_inspections=50&max_requests=8",
+      "schedule": "0 */2 * * *"
+    }
   ]
 }

@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc, or_
 from pydantic import BaseModel
@@ -10,8 +10,14 @@ from src.database.connection import get_db
 from src.database.models import Inspection, Violation, EnrichmentStatus, Company, Contact
 from src.services.sync_service import sync_service
 from src.services.web_enrichment import web_enrichment_service
+from src.config import settings
 
 router = APIRouter()
+
+
+def _verify_cron_secret(x_cron_secret: Optional[str]) -> None:
+    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
 
 
 class ViolationResponse(BaseModel):
@@ -696,6 +702,27 @@ async def trigger_sync(
     return SyncResponse(**stats)
 
 
+@router.get("/cron/inspections", response_model=SyncResponse)
+async def cron_sync_inspections(
+    max_requests: int = Query(6, ge=1, le=50, description="Max API requests per run"),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """Cron-triggered inspection sync (Vercel-friendly)."""
+    _verify_cron_secret(x_cron_secret)
+    from src.services.api_sync_service import APISyncService
+
+    service = APISyncService()
+    stats = await service.sync_new_records(max_requests=max_requests)
+    return SyncResponse(
+        fetched=stats.get("api_inspections_fetched", 0),
+        created=stats.get("new_inspections_added", 0),
+        updated=0,
+        skipped_old=0,
+        skipped_state=stats.get("skipped_non_se", 0),
+        errors=len(stats.get("errors", [])),
+        logs=stats.get("errors", []),
+    )
+
 @router.get("/sync/status")
 async def get_sync_status():
     """Get current sync status."""
@@ -799,7 +826,10 @@ class ViolationSyncResponseWithLogs(ViolationSyncResponse):
 
 @router.post("/sync/violations", response_model=ViolationSyncResponseWithLogs)
 async def trigger_violation_sync(
-    max_inspections: int = Query(3, ge=1, le=500, description="Max inspections to check (default 3 for Vercel timeout)")
+    max_inspections: int = Query(3, ge=1, le=500, description="Max inspections to check (default 3 for Vercel timeout)"),
+    days_back: int = Query(180, ge=30, le=365, description="How far back to check inspections (days)"),
+    min_days_between_checks: int = Query(7, ge=1, le=90, description="Skip inspections checked within this window"),
+    max_requests: int = Query(10, ge=1, le=50, description="Max API requests per run"),
 ):
     """
     Manually trigger a violation sync for existing inspections.
@@ -814,7 +844,32 @@ async def trigger_violation_sync(
 
     stats = await violation_sync_service.sync_violations_smart(
         max_inspections_to_check=max_inspections,
-        rate_limit_delay=1.5  # Match the inspection sync delay
+        rate_limit_delay=1.5,  # Match the inspection sync delay
+        days_back=days_back,
+        min_days_between_checks=min_days_between_checks,
+        max_requests=max_requests,
+    )
+    return ViolationSyncResponseWithLogs(**stats)
+
+
+@router.get("/cron/violations", response_model=ViolationSyncResponseWithLogs)
+async def cron_sync_violations(
+    max_inspections: int = Query(50, ge=1, le=500, description="Max inspections to check"),
+    days_back: int = Query(180, ge=30, le=365, description="How far back to check inspections (days)"),
+    min_days_between_checks: int = Query(7, ge=1, le=90, description="Skip inspections checked within this window"),
+    max_requests: int = Query(8, ge=1, le=50, description="Max API requests per run"),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """Cron-triggered violation sync (Vercel-friendly)."""
+    _verify_cron_secret(x_cron_secret)
+    from src.services.violation_sync_service import violation_sync_service
+
+    stats = await violation_sync_service.sync_violations_smart(
+        max_inspections_to_check=max_inspections,
+        rate_limit_delay=1.5,
+        days_back=days_back,
+        min_days_between_checks=min_days_between_checks,
+        max_requests=max_requests,
     )
     return ViolationSyncResponseWithLogs(**stats)
 

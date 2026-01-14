@@ -5,7 +5,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import func, desc, asc
+from sqlalchemy import func, desc, asc, select
 
 from src.database.connection import get_db_session
 from src.database.models import EPACase
@@ -234,50 +234,68 @@ async def get_stats(
 ):
     """Get EPA enforcement statistics."""
     with get_db_session() as db:
-        query = db.query(EPACase)
-
-        # Apply filters
+        filters = []
         if state:
-            query = query.filter(EPACase.facility_state == state.upper())
+            filters.append(EPACase.facility_state == state.upper())
         if start_date:
-            query = query.filter(EPACase.date_filed >= start_date)
+            filters.append(EPACase.date_filed >= start_date)
         if end_date:
-            query = query.filter(EPACase.date_filed <= end_date)
+            filters.append(EPACase.date_filed <= end_date)
 
-        # Total cases
-        total_cases = query.count()
+        stats_query = select(
+            func.count(EPACase.id),
+            func.coalesce(func.sum(EPACase.fed_penalty), 0),
+            func.count(func.distinct(EPACase.facility_state)),
+            func.count(EPACase.id).filter(EPACase.caa_flag == True),
+            func.count(EPACase.id).filter(EPACase.cwa_flag == True),
+            func.count(EPACase.id).filter(EPACase.rcra_flag == True),
+            func.count(EPACase.id).filter(EPACase.sdwa_flag == True),
+            func.count(EPACase.id).filter(EPACase.cercla_flag == True),
+            func.count(EPACase.id).filter(EPACase.epcra_flag == True),
+            func.count(EPACase.id).filter(EPACase.tsca_flag == True),
+            func.count(EPACase.id).filter(EPACase.fifra_flag == True),
+        )
+        if filters:
+            stats_query = stats_query.where(*filters)
 
-        # Total penalties
-        total_penalties = db.query(func.coalesce(func.sum(EPACase.fed_penalty), 0)).scalar() or 0
-
-        # Unique states
-        states_count = db.query(func.count(func.distinct(EPACase.facility_state))).scalar() or 0
+        result = db.execute(stats_query).one()
+        total_cases = result[0] or 0
+        total_penalties = result[1] or 0
+        states_count = result[2] or 0
 
         # Average penalty
         avg_penalty = total_penalties / total_cases if total_cases > 0 else 0
 
         # Cases by law
         by_law = {
-            "CAA": query.filter(EPACase.caa_flag == True).count(),
-            "CWA": query.filter(EPACase.cwa_flag == True).count(),
-            "RCRA": query.filter(EPACase.rcra_flag == True).count(),
-            "SDWA": query.filter(EPACase.sdwa_flag == True).count(),
-            "CERCLA": query.filter(EPACase.cercla_flag == True).count(),
-            "EPCRA": query.filter(EPACase.epcra_flag == True).count(),
-            "TSCA": query.filter(EPACase.tsca_flag == True).count(),
-            "FIFRA": query.filter(EPACase.fifra_flag == True).count(),
+            "CAA": result[3] or 0,
+            "CWA": result[4] or 0,
+            "RCRA": result[5] or 0,
+            "SDWA": result[6] or 0,
+            "CERCLA": result[7] or 0,
+            "EPCRA": result[8] or 0,
+            "TSCA": result[9] or 0,
+            "FIFRA": result[10] or 0,
         }
 
         # Cases by status
-        status_counts = db.query(
+        status_query = select(
             EPACase.case_status,
             func.count(EPACase.id)
-        ).group_by(EPACase.case_status).all()
+        ).group_by(EPACase.case_status)
+        if filters:
+            status_query = status_query.where(*filters)
+        status_counts = db.execute(status_query).all()
         by_status = {s[0] or "Unknown": s[1] for s in status_counts}
 
         # Recent cases (last 30 days)
         thirty_days_ago = datetime.now() - timedelta(days=30)
-        recent_cases = query.filter(EPACase.date_filed >= thirty_days_ago.date()).count()
+        recent_query = select(func.count(EPACase.id)).where(
+            EPACase.date_filed >= thirty_days_ago.date()
+        )
+        if filters:
+            recent_query = recent_query.where(*filters)
+        recent_cases = db.execute(recent_query).scalar() or 0
 
         return EPAStatsResponse(
             total_cases=total_cases,

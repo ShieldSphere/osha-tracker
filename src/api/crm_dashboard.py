@@ -1,4 +1,4 @@
-"""CRM Dashboard page."""
+﻿"""CRM Dashboard page."""
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -31,17 +31,17 @@ async def crm_page():
                 <div class="flex items-center space-x-8">
                     <h1 class="text-xl font-bold">TSG Safety</h1>
                     <div class="flex space-x-1">
-                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
-                        <a href="/osha" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">OSHA</a>
-                        <a href="/epa" class="px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">EPA</a>
-                        <a href="/crm" class="px-3 py-2 rounded-md text-sm font-medium bg-purple-600 text-white">CRM</a>
+                        <a href="/" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">Overview</a>
+                        <a href="/osha" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">OSHA</a>
+                        <a href="/epa" class="px-4 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700">EPA</a>
+                        <a href="/crm" class="px-4 py-2 rounded-md text-sm font-medium bg-purple-600 text-white">CRM</a>
                     </div>
                 </div>
             </div>
         </div>
     </nav>
 
-    <div class="max-w-7xl mx-auto px-4 py-6">
+    <div class="max-w-7xl mx-auto px-4 py-8">
         <!-- Header -->
         <div class="mb-6">
             <h2 class="text-2xl font-bold text-gray-800">Sales Pipeline</h2>
@@ -1133,3 +1133,4 @@ async def crm_page():
 </body>
 </html>
 """
+
