@@ -10,10 +10,6 @@
     {
       "path": "/api/inspections/cron/violations?days_back=180&min_days_between_checks=7&max_inspections=50&max_requests=8",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/epa/cron/sync?days_back=90&min_penalty=0",
-      "schedule": "0 4 * * *"
     }
   ]
 }
