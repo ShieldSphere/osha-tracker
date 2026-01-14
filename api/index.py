@@ -10,6 +10,7 @@ os.environ["VERCEL"] = "1"
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from mangum import Mangum
 
 app = FastAPI()
 
@@ -60,5 +61,5 @@ async def test_imports():
 
     return {"all_passed": True, "results": results}
 
-# Export for Vercel
-handler = app
+# Mangum handler for AWS Lambda/Vercel serverless
+handler = Mangum(app, lifespan="off")
