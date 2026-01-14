@@ -3,13 +3,15 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Query, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel
 from sqlalchemy import func, desc, asc, select
 
 from src.database.connection import get_db_session
-from src.database.models import EPACase
+from src.database.models import EPACase, CronRun
 from src.services.epa_sync_service import epa_sync_service
+from src.config import settings
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +371,49 @@ async def sync_cases(
         success=True,
         message=f"EPA sync started for {'all states' if not state_list else ', '.join(state_list)} ({days_back} days back)"
     )
+
+
+@router.get("/cron/sync", response_model=SyncResponse)
+async def cron_sync_cases(
+    states: Optional[str] = Query(None, description="Comma-separated state codes"),
+    days_back: int = Query(90, ge=1, le=365),
+    min_penalty: float = Query(0, ge=0),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """Cron-triggered EPA sync."""
+    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
+
+    state_list = [s.strip().upper() for s in states.split(",")] if states else None
+
+    with get_db_session() as db:
+        run = CronRun(job_name="epa", status="running")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        try:
+            stats = await epa_sync_service.sync_cases(
+                states=state_list,
+                days_back=days_back,
+                min_penalty=min_penalty,
+            )
+            run.status = "success"
+            run.finished_at = datetime.utcnow()
+            run.details = json.dumps(stats)
+            db.commit()
+
+            return SyncResponse(
+                success=True,
+                message=f"EPA sync completed ({days_back} days back)",
+                stats=stats,
+            )
+        except Exception as exc:
+            run.status = "failed"
+            run.finished_at = datetime.utcnow()
+            run.error = str(exc)
+            db.commit()
+            raise
 
 
 @router.get("/date-range")

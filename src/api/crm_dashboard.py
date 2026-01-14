@@ -1130,6 +1130,153 @@ async def crm_page():
             if (e.target.id === 'company-info-modal') closeCompanyInfoModal();
         });
     </script>
+
+    <div id="sync-widget" class="fixed bottom-4 right-4 z-50 w-80 bg-white border border-gray-200 rounded-lg shadow-lg">
+        <div class="flex items-center justify-between px-3 py-2 border-b bg-gray-50">
+            <span class="text-xs font-semibold text-gray-800">Sync Status</span>
+            <button id="sync-widget-toggle" class="text-xs text-blue-600 hover:text-blue-800">Hide</button>
+        </div>
+        <div id="sync-widget-body" class="px-3 py-2">
+            <div id="sync-widget-content" class="text-[10px] text-gray-600 space-y-1">Loading...</div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const widget = document.getElementById('sync-widget');
+            if (!widget) return;
+            const body = document.getElementById('sync-widget-body');
+            const toggle = document.getElementById('sync-widget-toggle');
+            const content = document.getElementById('sync-widget-content');
+            let cronEventSource = null;
+            let lastRunId = 0;
+            let reconnectTimer = null;
+
+            function setCollapsed(collapsed) {
+                body.style.display = collapsed ? 'none' : 'block';
+                toggle.textContent = collapsed ? 'Show' : 'Hide';
+                localStorage.setItem('syncWidgetCollapsed', collapsed ? '1' : '0');
+            }
+
+            const initial = localStorage.getItem('syncWidgetCollapsed') === '1';
+            setCollapsed(initial);
+
+            toggle.addEventListener('click', () => setCollapsed(body.style.display !== 'none'));
+
+            function formatTime(value) {
+                if (!value) return 'n/a';
+                const dt = new Date(value);
+                if (Number.isNaN(dt.getTime())) return 'n/a';
+                return dt.toLocaleString();
+            }
+
+            function parseDetails(details) {
+                if (!details) return null;
+                try {
+                    return JSON.parse(details);
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function getAddedCount(label, details) {
+                if (!details) return 'n/a';
+                if (label === 'Inspections') return details.new_inspections_added ?? 0;
+                if (label === 'Violations') return details.new_violations_found ?? 0;
+                if (label === 'EPA') return details.new ?? 0;
+                return 'n/a';
+            }
+
+            function formatLine(label, run) {
+                if (!run) return `${label}: n/a`;
+                const status = run.status || 'unknown';
+                const end = formatTime(run.finished_at);
+                const details = parseDetails(run.details);
+                const added = getAddedCount(label, details);
+                return `${label}: ${status} | ${end} | added ${added}`;
+            }
+
+            function getLatestRunId(latest) {
+                const ids = Object.values(latest || {}).map(entry => entry?.id || 0);
+                return ids.length ? Math.max(...ids) : 0;
+            }
+
+            function renderSyncStatus(latest) {
+                const lines = [
+                    formatLine('Inspections', latest.inspections),
+                    formatLine('Violations', latest.violations),
+                    formatLine('EPA', latest.epa),
+                ];
+
+                content.innerHTML = [
+                    ...lines.map(line => `<div>${line}</div>`),
+                    `<div><a href="/api/inspections/cron/status" target="_blank" class="text-blue-600 hover:text-blue-800">View sync history</a></div>`
+                ].join('');
+            }
+
+            async function loadSyncWidget() {
+                try {
+                    const response = await fetch('/api/inspections/cron/status');
+                    if (response.status === 401) {
+                        content.textContent = 'Sync status unavailable (unauthorized).';
+                        return false;
+                    }
+                    if (!response.ok) {
+                        content.textContent = 'Sync status unavailable.';
+                        return false;
+                    }
+
+                    const data = await response.json();
+                    const latest = data.latest || {};
+                    renderSyncStatus(latest);
+                    lastRunId = getLatestRunId(latest);
+                    return true;
+                } catch (e) {
+                    content.textContent = 'Sync status unavailable.';
+                    return false;
+                }
+            }
+
+            function startSyncStream() {
+                if (!window.EventSource || cronEventSource) return;
+                const streamUrl = lastRunId
+                    ? `/api/inspections/cron/stream?last_id=${encodeURIComponent(lastRunId)}`
+                    : '/api/inspections/cron/stream';
+                cronEventSource = new EventSource(streamUrl);
+
+                cronEventSource.addEventListener('cron_update', (event) => {
+                    try {
+                        const payload = JSON.parse(event.data || '{}');
+                        if (payload.latest) {
+                            renderSyncStatus(payload.latest);
+                        }
+                        if (payload.run_id) {
+                            lastRunId = payload.run_id;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing sync update:', e);
+                    }
+                });
+
+                cronEventSource.onerror = () => {
+                    if (cronEventSource) {
+                        cronEventSource.close();
+                        cronEventSource = null;
+                    }
+                    if (!reconnectTimer) {
+                        reconnectTimer = setTimeout(() => {
+                            reconnectTimer = null;
+                            startSyncStream();
+                        }, 10000);
+                    }
+                };
+            }
+
+            loadSyncWidget().then((ok) => {
+                if (ok) startSyncStream();
+            });
+        })();
+    </script>
+
 </body>
 </html>
 """

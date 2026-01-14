@@ -520,3 +520,15 @@ class EPACase(Base):
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CronRun(Base):
+    __tablename__ = "cron_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_name = Column(String(50), nullable=False, index=True)
+    status = Column(String(20), nullable=False, index=True)  # running, success, failed
+    started_at = Column(DateTime, default=datetime.utcnow, index=True)
+    finished_at = Column(DateTime, nullable=True)
+    details = Column(Text, nullable=True)  # JSON blob with stats
+    error = Column(Text, nullable=True)

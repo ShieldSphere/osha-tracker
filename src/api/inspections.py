@@ -1,13 +1,17 @@
 from datetime import date
 from typing import Optional, List
+import asyncio
+import time
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Header
+from fastapi import APIRouter, Depends, Query, HTTPException, Header, Request
+from fastapi.responses import StreamingResponse
+import json
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc, or_
 from pydantic import BaseModel
 
-from src.database.connection import get_db
-from src.database.models import Inspection, Violation, EnrichmentStatus, Company, Contact
+from src.database.connection import get_db, get_db_session
+from src.database.models import Inspection, Violation, EnrichmentStatus, Company, Contact, CronRun
 from src.services.sync_service import sync_service
 from src.services.web_enrichment import web_enrichment_service
 from src.config import settings
@@ -18,6 +22,30 @@ router = APIRouter()
 def _verify_cron_secret(x_cron_secret: Optional[str]) -> None:
     if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
         raise HTTPException(status_code=401, detail="Invalid cron secret")
+
+
+def _start_cron_run(db: Session, job_name: str) -> CronRun:
+    run = CronRun(job_name=job_name, status="running")
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def _finish_cron_run(db: Session, run: CronRun, status: str, details: Optional[str] = None, error: Optional[str] = None) -> None:
+    from datetime import datetime
+
+    run.status = status
+    run.finished_at = datetime.utcnow()
+    run.details = details
+    run.error = error
+    db.commit()
+
+
+def _format_dt(dt_value):
+    if not dt_value:
+        return None
+    return f"{dt_value.isoformat()}Z"
 
 
 class ViolationResponse(BaseModel):
@@ -706,22 +734,29 @@ async def trigger_sync(
 async def cron_sync_inspections(
     max_requests: int = Query(6, ge=1, le=50, description="Max API requests per run"),
     x_cron_secret: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
 ):
     """Cron-triggered inspection sync (Vercel-friendly)."""
     _verify_cron_secret(x_cron_secret)
     from src.services.api_sync_service import APISyncService
 
     service = APISyncService()
-    stats = await service.sync_new_records(max_requests=max_requests)
-    return SyncResponse(
-        fetched=stats.get("api_inspections_fetched", 0),
-        created=stats.get("new_inspections_added", 0),
-        updated=0,
-        skipped_old=0,
-        skipped_state=stats.get("skipped_non_se", 0),
-        errors=len(stats.get("errors", [])),
-        logs=stats.get("errors", []),
-    )
+    run = _start_cron_run(db, "inspections")
+    try:
+        stats = await service.sync_new_records(max_requests=max_requests)
+        _finish_cron_run(db, run, "success", details=json.dumps(stats))
+        return SyncResponse(
+            fetched=stats.get("api_inspections_fetched", 0),
+            created=stats.get("new_inspections_added", 0),
+            updated=0,
+            skipped_old=stats.get("skipped_old", 0),
+            skipped_state=stats.get("skipped_non_se", 0),
+            errors=len(stats.get("errors", [])),
+            logs=stats.get("errors", []),
+        )
+    except Exception as exc:
+        _finish_cron_run(db, run, "failed", error=str(exc))
+        raise
 
 @router.get("/sync/status")
 async def get_sync_status():
@@ -859,19 +894,138 @@ async def cron_sync_violations(
     min_days_between_checks: int = Query(7, ge=1, le=90, description="Skip inspections checked within this window"),
     max_requests: int = Query(8, ge=1, le=50, description="Max API requests per run"),
     x_cron_secret: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
 ):
     """Cron-triggered violation sync (Vercel-friendly)."""
     _verify_cron_secret(x_cron_secret)
     from src.services.violation_sync_service import violation_sync_service
 
-    stats = await violation_sync_service.sync_violations_smart(
-        max_inspections_to_check=max_inspections,
-        rate_limit_delay=1.5,
-        days_back=days_back,
-        min_days_between_checks=min_days_between_checks,
-        max_requests=max_requests,
-    )
-    return ViolationSyncResponseWithLogs(**stats)
+    run = _start_cron_run(db, "violations")
+    try:
+        stats = await violation_sync_service.sync_violations_smart(
+            max_inspections_to_check=max_inspections,
+            rate_limit_delay=1.5,
+            days_back=days_back,
+            min_days_between_checks=min_days_between_checks,
+            max_requests=max_requests,
+        )
+        _finish_cron_run(db, run, "success", details=json.dumps(stats))
+        return ViolationSyncResponseWithLogs(**stats)
+    except Exception as exc:
+        _finish_cron_run(db, run, "failed", error=str(exc))
+        raise
+
+
+@router.get("/cron/status")
+async def cron_status(
+    limit: int = Query(20, ge=1, le=100, description="Number of runs to return"),
+    x_cron_secret: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """Get recent cron run status and details."""
+    _verify_cron_secret(x_cron_secret)
+
+    runs = db.execute(
+        select(CronRun).order_by(CronRun.started_at.desc()).limit(limit)
+    ).scalars().all()
+
+    latest = {}
+    for run in runs:
+        if run.job_name not in latest:
+            latest[run.job_name] = {
+                "id": run.id,
+                "job_name": run.job_name,
+                "status": run.status,
+                "started_at": _format_dt(run.started_at),
+                "finished_at": _format_dt(run.finished_at),
+                "details": run.details,
+                "error": run.error,
+            }
+
+    return {
+        "latest": latest,
+        "runs": [
+            {
+                "id": r.id,
+                "job_name": r.job_name,
+                "status": r.status,
+                "started_at": _format_dt(r.started_at),
+                "finished_at": _format_dt(r.finished_at),
+                "details": r.details,
+                "error": r.error,
+            }
+            for r in runs
+        ],
+    }
+
+
+@router.get("/cron/stream")
+async def cron_status_stream(
+    request: Request,
+    last_id: int = Query(0, ge=0, description="Last seen cron run id"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """Stream cron status updates when a cron job completes."""
+    _verify_cron_secret(x_cron_secret)
+
+    start_id = last_id
+    if last_event_id and last_event_id.isdigit():
+        start_id = max(start_id, int(last_event_id))
+
+    async def event_generator():
+        last_sent_id = start_id
+        keepalive_interval = 15.0
+        poll_interval = 2.0
+        last_keepalive = time.monotonic()
+
+        yield "retry: 5000\n\n"
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            with get_db_session() as db:
+                run = db.execute(
+                    select(CronRun)
+                    .where(CronRun.finished_at.isnot(None))
+                    .where(CronRun.id > last_sent_id)
+                    .order_by(CronRun.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+
+                if run:
+                    last_sent_id = run.id
+                    runs = db.execute(
+                        select(CronRun).order_by(CronRun.started_at.desc()).limit(20)
+                    ).scalars().all()
+
+                    latest = {}
+                    for entry in runs:
+                        if entry.job_name not in latest:
+                            latest[entry.job_name] = {
+                                "id": entry.id,
+                                "job_name": entry.job_name,
+                                "status": entry.status,
+                                "started_at": _format_dt(entry.started_at),
+                                "finished_at": _format_dt(entry.finished_at),
+                                "details": entry.details,
+                                "error": entry.error,
+                            }
+
+                    payload = json.dumps({
+                        "latest": latest,
+                        "run_id": last_sent_id,
+                    })
+                    yield f"id: {last_sent_id}\nevent: cron_update\ndata: {payload}\n\n"
+                    last_keepalive = time.monotonic()
+                elif time.monotonic() - last_keepalive >= keepalive_interval:
+                    yield ": keepalive\n\n"
+                    last_keepalive = time.monotonic()
+
+            await asyncio.sleep(poll_interval)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/{inspection_id}/sync-violations")
