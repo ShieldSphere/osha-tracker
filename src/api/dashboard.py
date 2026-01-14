@@ -289,6 +289,39 @@ async def osha_dashboard():
         </div>
     </div>
 
+    <!-- Email Generation Modal -->
+    <div id="email-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-[70]">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b flex justify-between items-center flex-shrink-0 bg-purple-50">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    <h2 class="text-lg font-semibold text-gray-900">Generated Email</h2>
+                </div>
+                <button onclick="closeEmailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            <div class="p-4 border-b bg-gray-50">
+                <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Subject Line</p>
+                <p id="email-subject" class="text-sm font-medium text-gray-900"></p>
+            </div>
+            <div class="overflow-y-auto flex-1 p-4">
+                <pre id="email-body" class="whitespace-pre-wrap text-sm text-gray-800 font-sans leading-relaxed"></pre>
+            </div>
+            <div class="p-4 border-t flex justify-end gap-3 flex-shrink-0 bg-gray-50">
+                <button onclick="closeEmailModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+                    Close
+                </button>
+                <button onclick="copyEmailToClipboard()" class="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+                    </svg>
+                    Copy to Clipboard
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Charts Modal -->
     <div id="charts-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
         <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -1140,6 +1173,9 @@ async def osha_dashboard():
                     fetch(`${API_BASE}/${id}/related`).then(r => r.json())
                 ]);
 
+                // Store for email generation
+                currentInspection = inspection;
+
                 const mapsUrl = getGoogleMapsUrl(inspection.site_address, inspection.site_city, inspection.site_state, inspection.site_zip);
                 const oshaUrl = getOshaInspectionUrl(inspection.activity_nr, inspection.estab_name, inspection.site_state);
 
@@ -1469,6 +1505,7 @@ async def osha_dashboard():
         let currentWebEnrichmentResult = null;
         let currentApolloResult = null;
         let revealedContacts = [];  // Contacts with revealed email/phone from Step 2
+        let currentInspection = null;  // Store current inspection for email generation
 
         async function enrichInspection(inspectionId) {
             const btn = document.getElementById(`enrich-btn-${inspectionId}`);
@@ -2616,6 +2653,12 @@ async def osha_dashboard():
                                         Website
                                     </a>
                                 ` : ''}
+                                <button onclick="openEmailModal(${inspectionId})" class="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 ml-2 px-2 py-1 bg-purple-50 rounded hover:bg-purple-100 transition-colors">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                    </svg>
+                                    Generate Email
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -3210,6 +3253,106 @@ async def osha_dashboard():
         function closeCompanyDetailModal() {
             document.getElementById('company-detail-modal').classList.add('hidden');
             window.currentEditCompany = null;
+        }
+
+        // Email Generation Functions
+        let currentEmailContent = { subject: '', body: '' };
+
+        function getInspectionTypeName(code) {
+            const types = {
+                'A': 'Accident Investigation',
+                'B': 'Complaint',
+                'C': 'Referral',
+                'D': 'Monitoring',
+                'E': 'Variance',
+                'F': 'Follow-up',
+                'G': 'Unprogrammed Related',
+                'H': 'Planned',
+                'I': 'Unprogrammed Other',
+                'J': 'Programmed Related',
+                'K': 'Programmed Other',
+                'L': 'Fatality/Catastrophe'
+            };
+            return types[code] || 'an inspection';
+        }
+
+        async function openEmailModal(inspectionId) {
+            // Get inspection and company data
+            const inspection = currentInspection;
+            if (!inspection) {
+                alert('No inspection data available');
+                return;
+            }
+
+            // Try to get company data for contact name
+            let contactName = null;
+            try {
+                const company = await fetch(`/api/inspections/${inspectionId}/company`).then(r => r.json());
+                if (company && company.contacts && company.contacts.length > 0) {
+                    // Find first contact with a name
+                    const contact = company.contacts.find(c => c.full_name || c.first_name);
+                    if (contact) {
+                        contactName = contact.first_name || contact.full_name?.split(' ')[0] || null;
+                    }
+                }
+            } catch (e) {
+                console.log('No company/contact data available');
+            }
+
+            // Format data for email
+            const companyName = inspection.estab_name || 'your company';
+            const inspectionDate = inspection.open_date ? new Date(inspection.open_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'recently';
+            const inspectionReason = getInspectionTypeName(inspection.insp_type);
+
+            // Build greeting
+            const greeting = contactName ? `Hi ${contactName},` : 'Hi!';
+
+            // Generate email content
+            const subject = 'Following Up on Your Recent OSHA Visit';
+            const body = `${greeting}
+
+I noticed that ${companyName} was visited by OSHA on ${inspectionDate} regarding ${inspectionReason}.
+
+Dealing with OSHA can be stressful, especially when you're trying to run a business. At TSG Safety, we specialize in helping companies like yours with OSHA compliance and workplace safety—whether that's responding to citations, preparing for follow-up inspections, or building safety programs that prevent future issues.
+
+If you'd like to chat about your situation, I'm happy to help.`;
+
+            // Store for copying
+            currentEmailContent = { subject, body };
+
+            // Display in modal
+            document.getElementById('email-subject').textContent = subject;
+            document.getElementById('email-body').textContent = body;
+            document.getElementById('email-modal').classList.remove('hidden');
+        }
+
+        function closeEmailModal() {
+            document.getElementById('email-modal').classList.add('hidden');
+        }
+
+        async function copyEmailToClipboard() {
+            const fullEmail = `Subject: ${currentEmailContent.subject}\\n\\n${currentEmailContent.body}`;
+            try {
+                await navigator.clipboard.writeText(fullEmail);
+                // Show success feedback
+                const btn = event.target.closest('button');
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = `
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Copied!
+                `;
+                btn.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+                btn.classList.add('bg-green-600');
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('bg-green-600');
+                    btn.classList.add('bg-purple-600', 'hover:bg-purple-700');
+                }, 2000);
+            } catch (e) {
+                alert('Failed to copy to clipboard. Please select and copy manually.');
+            }
         }
 
         function toggleEditMode(companyId) {
