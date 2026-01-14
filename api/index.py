@@ -52,3 +52,21 @@ async def test_db():
             "error": str(e),
             "traceback": traceback.format_exc()
         })
+
+@app.get("/test-main-app")
+async def test_main_app():
+    """Test importing the main app."""
+    try:
+        from src.main import app as main_app
+        return {
+            "success": True,
+            "routes_count": len(main_app.routes),
+            "title": main_app.title
+        }
+    except Exception as e:
+        import traceback
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
