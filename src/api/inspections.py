@@ -695,6 +695,86 @@ async def get_sync_status():
     return await sync_service.get_sync_status()
 
 
+@router.get("/sync/test-dol-api")
+async def test_dol_api():
+    """
+    Test DOL API connectivity directly.
+    Returns diagnostic info about the API connection.
+    """
+    import httpx
+    from src.config import settings
+    from datetime import datetime, timedelta
+    import json
+
+    results = {
+        "timestamp": datetime.now().isoformat(),
+        "api_key_configured": bool(settings.DOL_API_KEY),
+        "api_key_preview": settings.DOL_API_KEY[:8] + "..." if settings.DOL_API_KEY else None,
+        "tests": []
+    }
+
+    # Test 1: Simple request without filter
+    try:
+        url = "https://apiprod.dol.gov/v4/get/OSHA/inspection/json"
+        params = {
+            "X-API-KEY": settings.DOL_API_KEY,
+            "limit": 1,
+            "offset": 0
+        }
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            response = await client.get(url, params=params)
+            results["tests"].append({
+                "name": "Simple request (limit=1)",
+                "url": url,
+                "status_code": response.status_code,
+                "response_length": len(response.text),
+                "response_preview": response.text[:500] if response.text else None,
+                "success": response.status_code == 200
+            })
+    except Exception as e:
+        results["tests"].append({
+            "name": "Simple request (limit=1)",
+            "error": f"{type(e).__name__}: {str(e)}",
+            "success": False
+        })
+
+    # Test 2: Request with date filter
+    try:
+        since_date = (datetime.now() - timedelta(days=30)).date()
+        date_str = since_date.strftime("%m/%d/%Y")
+        filter_object = {
+            "field": "open_date",
+            "operator": "gt",
+            "value": date_str
+        }
+        url = "https://apiprod.dol.gov/v4/get/OSHA/inspection/json"
+        params = {
+            "X-API-KEY": settings.DOL_API_KEY,
+            "limit": 5,
+            "offset": 0,
+            "filter_object": json.dumps(filter_object)
+        }
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            response = await client.get(url, params=params)
+            results["tests"].append({
+                "name": f"Filtered request (open_date > {date_str})",
+                "url": url,
+                "filter": filter_object,
+                "status_code": response.status_code,
+                "response_length": len(response.text),
+                "response_preview": response.text[:500] if response.text else None,
+                "success": response.status_code == 200
+            })
+    except Exception as e:
+        results["tests"].append({
+            "name": "Filtered request",
+            "error": f"{type(e).__name__}: {str(e)}",
+            "success": False
+        })
+
+    return results
+
+
 class ViolationSyncResponse(BaseModel):
     """Response model for violation sync operation."""
     inspections_checked: int
