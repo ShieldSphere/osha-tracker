@@ -61,7 +61,7 @@ class SyncService:
     def __init__(self):
         self.osha_client = OSHAClient()
 
-    async def sync_inspections(self, days_back: int = 30, max_requests: int = 3) -> Dict[str, Any]:
+    async def sync_inspections(self, days_back: int = 30, max_requests: int = 2) -> Dict[str, Any]:
         """
         Fetch inspections from OSHA and sync to database.
 

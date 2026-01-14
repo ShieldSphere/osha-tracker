@@ -683,13 +683,14 @@ async def get_inspection(inspection_id: int, db: Session = Depends(get_db)):
 @router.post("/sync", response_model=SyncResponse)
 async def trigger_sync(
     days_back: int = Query(30, ge=1, le=365),
-    max_requests: int = Query(3, ge=1, le=50, description="Max API requests (use 1-3 for Vercel due to timeout)")
+    max_requests: int = Query(2, ge=1, le=50, description="Max API requests (default 2 for Vercel timeout + rate limits)")
 ):
     """
     Manually trigger a sync of OSHA inspection data.
 
-    Note: Vercel has a 10-second timeout on Hobby plan. Use max_requests=1-3
-    to avoid timeout. Each request fetches up to 200 records.
+    Note: Vercel has a 10-second timeout on Hobby plan. Default is 2 requests
+    (400 records max) with 1.5s delay between requests to avoid DOL rate limits.
+    Call multiple times for more data.
     """
     stats = await sync_service.sync_inspections(days_back=days_back, max_requests=max_requests)
     return SyncResponse(**stats)
