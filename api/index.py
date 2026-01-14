@@ -34,3 +34,21 @@ async def test_config():
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+@app.get("/test-db")
+async def test_db():
+    """Test database connection."""
+    try:
+        from src.database.connection import engine, get_db_session
+        from sqlalchemy import text
+
+        with get_db_session() as db:
+            result = db.execute(text("SELECT 1")).scalar()
+            return {"success": True, "db_test": result}
+    except Exception as e:
+        import traceback
+        return JSONResponse(status_code=500, content={
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
