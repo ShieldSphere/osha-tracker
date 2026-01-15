@@ -3990,7 +3990,7 @@ If you'd like to chat about your situation, I'm happy to help.`;
                 <div id="sync-widget-manual" class="text-[10px] text-gray-600 space-y-0.5 pl-4">Loading...</div>
             </div>
             <div class="pt-1 border-t">
-                <a href="/api/inspections/cron/status" target="_blank" class="text-[10px] text-blue-600 hover:text-blue-800">View full sync history</a>
+                <a href="/api/inspections/cron/status?format=html" target="_blank" class="text-[10px] text-blue-600 hover:text-blue-800">View full sync history</a>
             </div>
         </div>
     </div>

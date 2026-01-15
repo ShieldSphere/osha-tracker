@@ -4,7 +4,7 @@ import asyncio
 import time
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Header, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 import json
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc, or_
@@ -63,8 +63,7 @@ class ViolationResponse(BaseModel):
     nr_exposed: Optional[int]
     gravity: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class InspectionResponse(BaseModel):
@@ -90,16 +89,14 @@ class InspectionResponse(BaseModel):
     nr_in_estab: Optional[int] = None
     enrichment_status: EnrichmentStatus
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True, "use_enum_values": True}
 
 
 class InspectionDetailResponse(InspectionResponse):
     """Response model for inspection with violations."""
     violations: List[ViolationResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True, "use_enum_values": True}
 
 
 class InspectionListResponse(BaseModel):
@@ -709,6 +706,7 @@ async def get_inspection(inspection_id: int, db: Session = Depends(get_db)):
         total_current_penalty=total_current,
         total_initial_penalty=total_initial,
         owner_type=inspection.owner_type,
+        nr_in_estab=inspection.nr_in_estab,
         enrichment_status=inspection.enrichment_status,
         violations=violations,
     )
@@ -732,30 +730,34 @@ async def trigger_sync(
 
 @router.get("/cron/inspections", response_model=SyncResponse)
 async def cron_sync_inspections(
-    max_requests: int = Query(6, ge=1, le=50, description="Max API requests per run"),
+    days_back: int = Query(30, ge=1, le=365, description="Days back to sync"),
+    max_requests: int = Query(2, ge=1, le=50, description="Max API requests per run (default 2 for Vercel timeout)"),
     x_cron_secret: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
 ):
-    """Cron-triggered inspection sync (Vercel-friendly)."""
-    _verify_cron_secret(x_cron_secret)
-    from src.services.api_sync_service import APISyncService
+    """
+    Cron-triggered inspection sync (Vercel-friendly).
 
-    service = APISyncService()
-    run = _start_cron_run(db, "inspections")
+    Uses the same SyncService as the manual /sync endpoint for consistency.
+    Default is 2 requests (400 records max) to stay within Vercel timeout.
+    """
+    _verify_cron_secret(x_cron_secret)
+
+    # Use context manager for cron tracking to avoid connection pool exhaustion
+    with get_db_session() as db:
+        run = _start_cron_run(db, "inspections")
+        run_id = run.id  # Save ID before session closes
+
     try:
-        stats = await service.sync_new_records(max_requests=max_requests)
-        _finish_cron_run(db, run, "success", details=json.dumps(stats))
-        return SyncResponse(
-            fetched=stats.get("api_inspections_fetched", 0),
-            created=stats.get("new_inspections_added", 0),
-            updated=0,
-            skipped_old=stats.get("skipped_old", 0),
-            skipped_state=stats.get("skipped_non_se", 0),
-            errors=len(stats.get("errors", [])),
-            logs=stats.get("errors", []),
-        )
+        stats = await sync_service.sync_inspections(days_back=days_back, max_requests=max_requests)
+        with get_db_session() as db:
+            # Re-fetch the run since we're in a new session
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "success", details=json.dumps(stats))
+        return SyncResponse(**stats)
     except Exception as exc:
-        _finish_cron_run(db, run, "failed", error=str(exc))
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "failed", error=str(exc))
         raise
 
 @router.get("/sync/status")
@@ -844,6 +846,90 @@ async def test_dol_api():
     return results
 
 
+@router.get("/sync/debug/{activity_nr}")
+async def debug_fetch_inspection(activity_nr: str):
+    """
+    Debug endpoint: Fetch a specific inspection directly from DOL API.
+    Use this to verify if an inspection exists in the API.
+    """
+    import httpx
+    import json
+    from src.config import settings
+
+    results = {
+        "activity_nr": activity_nr,
+        "found_in_api": False,
+        "found_in_db": False,
+        "api_data": None,
+        "db_data": None,
+        "would_be_filtered": None,
+        "filter_reason": None,
+    }
+
+    # Check if it exists in our database
+    with get_db_session() as db:
+        existing = db.execute(
+            select(Inspection).where(Inspection.activity_nr == activity_nr)
+        ).scalar_one_or_none()
+        if existing:
+            results["found_in_db"] = True
+            results["db_data"] = {
+                "id": existing.id,
+                "activity_nr": existing.activity_nr,
+                "estab_name": existing.estab_name,
+                "site_state": existing.site_state,
+                "site_city": existing.site_city,
+                "open_date": existing.open_date.isoformat() if existing.open_date else None,
+            }
+
+    # Fetch directly from DOL API
+    try:
+        filter_object = {
+            "field": "activity_nr",
+            "operator": "eq",
+            "value": activity_nr
+        }
+        url = "https://apiprod.dol.gov/v4/get/OSHA/inspection/json"
+        params = {
+            "X-API-KEY": settings.DOL_API_KEY,
+            "limit": 1,
+            "filter_object": json.dumps(filter_object),
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+            response = await client.get(url, params=params)
+            results["api_status"] = response.status_code
+
+            if response.status_code == 200 and response.text:
+                data = response.json()
+                records = data.get("data", []) if isinstance(data, dict) else data
+                if records:
+                    results["found_in_api"] = True
+                    results["api_data"] = records[0]
+
+                    # Check if it would be filtered
+                    site_state = records[0].get("site_state", "")
+                    open_date = records[0].get("open_date", "")
+
+                    se_states = {"AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "VA", "WV"}
+                    if site_state and site_state.upper() not in se_states:
+                        results["would_be_filtered"] = True
+                        results["filter_reason"] = f"State '{site_state}' not in SE states"
+                    else:
+                        results["would_be_filtered"] = False
+                else:
+                    results["api_response"] = "No records returned"
+            elif response.status_code == 204:
+                results["api_response"] = "204 No Content - inspection not found in API"
+            else:
+                results["api_response"] = response.text[:500]
+
+    except Exception as e:
+        results["api_error"] = f"{type(e).__name__}: {str(e)}"
+
+    return results
+
+
 class ViolationSyncResponse(BaseModel):
     """Response model for violation sync operation."""
     inspections_checked: int
@@ -856,6 +942,28 @@ class ViolationSyncResponse(BaseModel):
 
 class ViolationSyncResponseWithLogs(ViolationSyncResponse):
     """Response model for violation sync with logs."""
+    logs: List[str] = []
+
+
+class RecentViolationsSyncResponse(BaseModel):
+    """Response model for recent violations sync operation."""
+    inspections_checked: int
+    violations_fetched: int
+    violations_inserted: int
+    violations_updated: int
+    inspections_with_new_violations: int
+    errors: int
+    logs: List[str] = []
+
+
+class BulkViolationsSyncResponse(BaseModel):
+    """Response model for bulk violations sync operation."""
+    violations_fetched: int
+    violations_inserted: int
+    violations_updated: int
+    violations_skipped: int
+    inspections_with_new_violations: int
+    errors: int
     logs: List[str] = []
 
 
@@ -889,18 +997,21 @@ async def trigger_violation_sync(
 
 @router.get("/cron/violations", response_model=ViolationSyncResponseWithLogs)
 async def cron_sync_violations(
-    max_inspections: int = Query(50, ge=1, le=500, description="Max inspections to check"),
+    max_inspections: int = Query(3, ge=1, le=500, description="Max inspections to check (default 3 for Vercel timeout)"),
     days_back: int = Query(180, ge=30, le=365, description="How far back to check inspections (days)"),
     min_days_between_checks: int = Query(7, ge=1, le=90, description="Skip inspections checked within this window"),
-    max_requests: int = Query(8, ge=1, le=50, description="Max API requests per run"),
+    max_requests: int = Query(10, ge=1, le=50, description="Max API requests per run"),
     x_cron_secret: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
 ):
-    """Cron-triggered violation sync (Vercel-friendly)."""
+    """Cron-triggered violation sync (Vercel-friendly). Uses same defaults as manual sync."""
     _verify_cron_secret(x_cron_secret)
     from src.services.violation_sync_service import violation_sync_service
 
-    run = _start_cron_run(db, "violations")
+    # Use context manager for cron tracking to avoid connection pool exhaustion
+    with get_db_session() as db:
+        run = _start_cron_run(db, "violations")
+        run_id = run.id
+
     try:
         stats = await violation_sync_service.sync_violations_smart(
             max_inspections_to_check=max_inspections,
@@ -909,16 +1020,151 @@ async def cron_sync_violations(
             min_days_between_checks=min_days_between_checks,
             max_requests=max_requests,
         )
-        _finish_cron_run(db, run, "success", details=json.dumps(stats))
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "success", details=json.dumps(stats))
         return ViolationSyncResponseWithLogs(**stats)
     except Exception as exc:
-        _finish_cron_run(db, run, "failed", error=str(exc))
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "failed", error=str(exc))
+        raise
+
+
+@router.get("/cron/violations-recent", response_model=RecentViolationsSyncResponse)
+async def cron_sync_recent_violations(
+    inspection_days_back: int = Query(365, ge=30, le=730, description="Check inspections opened within this window"),
+    max_inspections: int = Query(10, ge=1, le=500, description="Max inspections to check per run (default 10 for Vercel timeout)"),
+    max_requests: int = Query(10, ge=1, le=100, description="Max API requests per run"),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """
+    Cron job to sync violations for inspections.
+
+    Strategy: Fetches violations for inspections opened in the last N days that
+    haven't been checked recently. OSHA typically issues citations ~6 months after
+    inspection, so we check inspections from the past year.
+
+    Note: DOL API does not support filtering violations by date - we must query
+    by activity_nr (inspection number).
+    """
+    _verify_cron_secret(x_cron_secret)
+    from src.services.violation_sync_service import violation_sync_service
+
+    # Use context manager for cron tracking to avoid connection pool exhaustion
+    with get_db_session() as db:
+        run = _start_cron_run(db, "violations-recent")
+        run_id = run.id
+
+    try:
+        stats = await violation_sync_service.sync_recent_violations(
+            inspection_days_back=inspection_days_back,
+            max_inspections=max_inspections,
+            max_requests=max_requests,
+            rate_limit_delay=1.5,
+        )
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "success", details=json.dumps(stats))
+        return RecentViolationsSyncResponse(**stats)
+    except Exception as exc:
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "failed", error=str(exc))
+        raise
+
+
+@router.post("/sync/violations-recent", response_model=RecentViolationsSyncResponse)
+async def manual_sync_recent_violations(
+    inspection_days_back: int = Query(365, ge=30, le=730, description="Check inspections opened within this window"),
+    max_inspections: int = Query(10, ge=1, le=500, description="Max inspections to check per run (default 10 for Vercel timeout)"),
+    max_requests: int = Query(10, ge=1, le=100, description="Max API requests per run"),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually trigger violations sync.
+
+    Fetches violations for inspections opened in the last N days that haven't
+    been checked recently or have no violations yet.
+    """
+    from src.services.violation_sync_service import violation_sync_service
+
+    stats = await violation_sync_service.sync_recent_violations(
+        inspection_days_back=inspection_days_back,
+        max_inspections=max_inspections,
+        max_requests=max_requests,
+        rate_limit_delay=1.5,
+    )
+    return RecentViolationsSyncResponse(**stats)
+
+
+@router.post("/sync/violations-bulk", response_model=BulkViolationsSyncResponse)
+async def manual_sync_violations_bulk(
+    days_back: int = Query(180, ge=30, le=365, description="How far back to fetch violations (days)"),
+    max_requests: int = Query(6, ge=1, le=200, description="Max API requests per run (default 6 for Vercel timeout)"),
+):
+    """
+    Bulk fetch violations by issuance_date and upsert to database.
+
+    This is the efficient approach:
+    1. Fetch ALL violations issued in the last N days (paginated, 200 per request)
+    2. Bulk upsert to Supabase violations table
+    3. Matching to inspections happens via foreign key in DB, not in Python
+
+    Much faster than the per-inspection approach since it fetches all violations
+    in one paginated sweep rather than querying by activity_nr.
+    """
+    from src.services.violation_sync_service import violation_sync_service
+
+    stats = await violation_sync_service.sync_violations_bulk(
+        days_back=days_back,
+        max_requests=max_requests,
+    )
+    return BulkViolationsSyncResponse(**stats)
+
+
+@router.get("/cron/violations-bulk", response_model=BulkViolationsSyncResponse)
+async def cron_sync_violations_bulk(
+    days_back: int = Query(180, ge=30, le=365, description="How far back to fetch violations (days)"),
+    max_requests: int = Query(6, ge=1, le=200, description="Max API requests per run (default 6 for Vercel timeout)"),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """
+    Cron job for bulk violation sync by issuance_date.
+
+    Efficient approach that fetches all recent violations in one paginated sweep,
+    then upserts to the violations table. Matching to inspections happens via
+    foreign key relationship in the database.
+    """
+    _verify_cron_secret(x_cron_secret)
+    from src.services.violation_sync_service import violation_sync_service
+
+    # Use context manager for cron tracking to avoid connection pool exhaustion
+    with get_db_session() as db:
+        run = _start_cron_run(db, "violations-bulk")
+        run_id = run.id
+
+    try:
+        stats = await violation_sync_service.sync_violations_bulk(
+            days_back=days_back,
+            max_requests=max_requests,
+        )
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "success", details=json.dumps(stats))
+        return BulkViolationsSyncResponse(**stats)
+    except Exception as exc:
+        with get_db_session() as db:
+            run = db.execute(select(CronRun).where(CronRun.id == run_id)).scalar_one()
+            _finish_cron_run(db, run, "failed", error=str(exc))
         raise
 
 
 @router.get("/cron/status")
 async def cron_status(
+    request: Request,
     limit: int = Query(20, ge=1, le=100, description="Number of runs to return"),
+    format: Optional[str] = Query(None, description="Response format: 'html' for web page, default is JSON"),
     x_cron_secret: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
@@ -942,6 +1188,11 @@ async def cron_status(
                 "error": run.error,
             }
 
+    # Return HTML if explicitly requested via format param, or if browser is requesting HTML
+    accept = request.headers.get("accept", "")
+    if format == "html" or (format is None and "text/html" in accept and "application/json" not in accept):
+        return _render_cron_status_html(latest, runs)
+
     return {
         "latest": latest,
         "runs": [
@@ -957,6 +1208,139 @@ async def cron_status(
             for r in runs
         ],
     }
+
+
+def _render_cron_status_html(latest: dict, runs: list) -> HTMLResponse:
+    """Render cron status as a readable HTML page."""
+
+    def format_details(details_str):
+        if not details_str:
+            return ""
+        try:
+            details = json.loads(details_str)
+            parts = []
+            for key, value in details.items():
+                if key != "logs":
+                    parts.append(f"<span class='detail'>{key}: <strong>{value}</strong></span>")
+            return " | ".join(parts)
+        except:
+            return details_str
+
+    def status_badge(status):
+        colors = {
+            "success": "bg-green-100 text-green-800",
+            "failed": "bg-red-100 text-red-800",
+            "running": "bg-yellow-100 text-yellow-800",
+        }
+        color = colors.get(status, "bg-gray-100 text-gray-800")
+        return f'<span class="px-2 py-1 text-xs font-medium rounded-full {color}">{status}</span>'
+
+    def format_time(dt_str):
+        if not dt_str:
+            return "—"
+        return dt_str.replace("T", " ").replace("Z", " UTC")
+
+    # Build latest section
+    latest_html = ""
+    job_order = ["inspections", "violations-bulk", "epa"]
+    for job_name in job_order:
+        if job_name in latest:
+            run = latest[job_name]
+            latest_html += f'''
+            <div class="bg-white rounded-lg shadow p-4 mb-3">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="font-semibold text-gray-800">{run['job_name'].replace('-', ' ').title()}</span>
+                    {status_badge(run['status'])}
+                </div>
+                <div class="text-sm text-gray-600 space-y-1">
+                    <div>Started: {format_time(run['started_at'])}</div>
+                    <div>Finished: {format_time(run['finished_at'])}</div>
+                    <div class="text-xs mt-2">{format_details(run['details'])}</div>
+                    {f'<div class="text-red-600 text-xs mt-1">Error: {run["error"]}</div>' if run.get('error') else ''}
+                </div>
+            </div>
+            '''
+
+    # Build runs table
+    runs_rows = ""
+    for r in runs:
+        runs_rows += f'''
+        <tr class="border-b hover:bg-gray-50">
+            <td class="px-4 py-2 text-sm">{r.id}</td>
+            <td class="px-4 py-2 text-sm font-medium">{r.job_name}</td>
+            <td class="px-4 py-2">{status_badge(r.status)}</td>
+            <td class="px-4 py-2 text-sm text-gray-600">{format_time(_format_dt(r.started_at))}</td>
+            <td class="px-4 py-2 text-sm text-gray-600">{format_time(_format_dt(r.finished_at))}</td>
+            <td class="px-4 py-2 text-xs text-gray-500 max-w-md truncate">{format_details(r.details)}</td>
+            <td class="px-4 py-2 text-xs text-red-600 max-w-xs truncate">{r.error or '—'}</td>
+        </tr>
+        '''
+
+    html = f'''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Cron Status - TSG Safety Tracker</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <meta http-equiv="refresh" content="30">
+    </head>
+    <body class="bg-gray-100 min-h-screen">
+        <nav class="bg-gray-800 text-white px-6 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-6">
+                    <span class="font-semibold">TSG Safety Tracker</span>
+                    <a href="/osha" class="text-sm text-gray-300 hover:text-white">OSHA</a>
+                    <a href="/epa" class="text-sm text-gray-300 hover:text-white">EPA</a>
+                    <a href="/crm" class="text-sm text-gray-300 hover:text-white">CRM</a>
+                </div>
+                <span class="text-xs text-gray-400">Auto-refreshes every 30s</span>
+            </div>
+        </nav>
+
+        <main class="max-w-6xl mx-auto px-4 py-8">
+            <h1 class="text-2xl font-bold text-gray-800 mb-6">Cron Sync Status</h1>
+
+            <div class="grid md:grid-cols-3 gap-4 mb-8">
+                <div class="md:col-span-3">
+                    <h2 class="text-lg font-semibold text-gray-700 mb-3">Latest Runs</h2>
+                </div>
+                {latest_html}
+            </div>
+
+            <div>
+                <h2 class="text-lg font-semibold text-gray-700 mb-3">Run History</h2>
+                <div class="bg-white rounded-lg shadow overflow-x-auto">
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Finished</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {runs_rows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="mt-8 text-center">
+                <a href="/api/inspections/cron/status?format=html&limit=100" class="text-blue-600 hover:text-blue-800 text-sm">View more runs</a>
+                <span class="text-gray-400 mx-2">|</span>
+                <a href="/osha" class="text-blue-600 hover:text-blue-800 text-sm">Back to Dashboard</a>
+            </div>
+        </main>
+    </body>
+    </html>
+    '''
+    return HTMLResponse(content=html, media_type="text/html; charset=utf-8")
 
 
 @router.get("/cron/stream")
@@ -1404,6 +1788,143 @@ async def get_inspection_company(inspection_id: int, db: Session = Depends(get_d
     )
 
 
+class RelatedCompanyResponse(BaseModel):
+    """Response for company data found via related inspection."""
+    company: CompanyDataResponse
+    source_inspection_id: int  # The inspection that has the company data
+    is_direct: bool  # True if company is directly linked to the requested inspection
+
+
+@router.get("/{inspection_id}/company-or-related", response_model=Optional[RelatedCompanyResponse])
+async def get_inspection_company_or_related(inspection_id: int, db: Session = Depends(get_db)):
+    """
+    Get company data for an inspection, checking related inspections if not directly linked.
+    This allows viewing enrichment data for any inspection of the same company.
+    """
+    # First, check if this inspection has directly linked company data
+    company = db.execute(
+        select(Company).where(Company.inspection_id == inspection_id)
+    ).scalar_one_or_none()
+
+    if company:
+        # Get contacts for this company
+        contacts = db.execute(
+            select(Contact).where(Contact.company_id == company.id)
+        ).scalars().all()
+
+        return RelatedCompanyResponse(
+            company=CompanyDataResponse(
+                id=company.id,
+                inspection_id=company.inspection_id,
+                name=company.name,
+                domain=company.domain,
+                website=company.website,
+                description=company.description,
+                industry=company.industry,
+                sub_industry=company.sub_industry,
+                employee_count=company.employee_count,
+                employee_range=company.employee_range,
+                year_founded=company.year_founded,
+                business_type=company.business_type,
+                registration_state=company.registration_state,
+                registration_number=company.registration_number,
+                phone=company.phone,
+                email=company.email,
+                address=company.address,
+                city=company.city,
+                state=company.state,
+                postal_code=company.postal_code,
+                linkedin_url=company.linkedin_url,
+                facebook_url=company.facebook_url,
+                twitter_url=company.twitter_url,
+                instagram_url=company.instagram_url,
+                youtube_url=company.youtube_url,
+                other_addresses=company.other_addresses,
+                services=company.services,
+                confidence=company.confidence,
+                contacted=company.contacted or False,
+                contacted_date=company.contacted_date.isoformat() if company.contacted_date else None,
+                contact_notes=company.contact_notes,
+                created_at=company.created_at.isoformat() if company.created_at else None,
+                contacts=[ContactResponse.model_validate(c) for c in contacts]
+            ),
+            source_inspection_id=inspection_id,
+            is_direct=True
+        )
+
+    # No direct company - look for related inspections with the same establishment name
+    inspection = db.execute(
+        select(Inspection).where(Inspection.id == inspection_id)
+    ).scalar_one_or_none()
+
+    if not inspection:
+        return None
+
+    # Find inspections with the same establishment name (case-insensitive)
+    related_inspections = db.execute(
+        select(Inspection).where(
+            func.lower(Inspection.estab_name) == func.lower(inspection.estab_name)
+        )
+    ).scalars().all()
+
+    # Check if any related inspection has company data
+    for related in related_inspections:
+        if related.id == inspection_id:
+            continue  # Skip self
+
+        related_company = db.execute(
+            select(Company).where(Company.inspection_id == related.id)
+        ).scalar_one_or_none()
+
+        if related_company:
+            # Found company data from a related inspection
+            contacts = db.execute(
+                select(Contact).where(Contact.company_id == related_company.id)
+            ).scalars().all()
+
+            return RelatedCompanyResponse(
+                company=CompanyDataResponse(
+                    id=related_company.id,
+                    inspection_id=related_company.inspection_id,
+                    name=related_company.name,
+                    domain=related_company.domain,
+                    website=related_company.website,
+                    description=related_company.description,
+                    industry=related_company.industry,
+                    sub_industry=related_company.sub_industry,
+                    employee_count=related_company.employee_count,
+                    employee_range=related_company.employee_range,
+                    year_founded=related_company.year_founded,
+                    business_type=related_company.business_type,
+                    registration_state=related_company.registration_state,
+                    registration_number=related_company.registration_number,
+                    phone=related_company.phone,
+                    email=related_company.email,
+                    address=related_company.address,
+                    city=related_company.city,
+                    state=related_company.state,
+                    postal_code=related_company.postal_code,
+                    linkedin_url=related_company.linkedin_url,
+                    facebook_url=related_company.facebook_url,
+                    twitter_url=related_company.twitter_url,
+                    instagram_url=related_company.instagram_url,
+                    youtube_url=related_company.youtube_url,
+                    other_addresses=related_company.other_addresses,
+                    services=related_company.services,
+                    confidence=related_company.confidence,
+                    contacted=related_company.contacted or False,
+                    contacted_date=related_company.contacted_date.isoformat() if related_company.contacted_date else None,
+                    contact_notes=related_company.contact_notes,
+                    created_at=related_company.created_at.isoformat() if related_company.created_at else None,
+                    contacts=[ContactResponse.model_validate(c) for c in contacts]
+                ),
+                source_inspection_id=related.id,
+                is_direct=False
+            )
+
+    return None
+
+
 @router.get("/companies/enriched", response_model=EnrichedCompaniesResponse)
 async def get_enriched_companies(
     contacted_filter: Optional[str] = Query(None, description="Filter: 'contacted', 'not_contacted', or None for all"),
@@ -1604,3 +2125,105 @@ async def update_company_contacted(
         "contacted_date": company.contacted_date.isoformat() if company.contacted_date else None,
         "contact_notes": company.contact_notes
     }
+
+
+class RelatedInspectionItem(BaseModel):
+    """Related inspection summary."""
+    id: int
+    activity_nr: str
+    estab_name: str
+    site_city: Optional[str] = None
+    site_state: Optional[str] = None
+    open_date: Optional[str] = None
+    close_case_date: Optional[str] = None
+    total_current_penalty: Optional[float] = None
+    violation_count: int = 0
+    is_primary: bool = False  # True if this is the inspection linked to the company
+
+
+class RelatedInspectionsResponse(BaseModel):
+    """Response for related inspections."""
+    company_id: int
+    company_name: str
+    inspections: list[RelatedInspectionItem]
+    total: int
+
+
+@router.get("/companies/{company_id}/related-inspections", response_model=RelatedInspectionsResponse)
+async def get_related_inspections(company_id: int, db: Session = Depends(get_db)):
+    """
+    Get all inspections related to a company.
+    Finds inspections with matching or similar establishment names.
+    Always includes the primary inspection linked to the company.
+    """
+    # Get the company
+    company = db.execute(
+        select(Company).where(Company.id == company_id)
+    ).scalar_one_or_none()
+
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Get the primary inspection linked to this company
+    primary_inspection = db.execute(
+        select(Inspection).where(Inspection.id == company.inspection_id)
+    ).scalar_one_or_none()
+
+    if not primary_inspection:
+        return RelatedInspectionsResponse(
+            company_id=company.id,
+            company_name=company.name,
+            inspections=[],
+            total=0
+        )
+
+    # Get the establishment name for matching
+    estab_name = primary_inspection.estab_name
+
+    # Build name conditions for matching related inspections
+    # Always include the primary inspection by ID, plus match on names
+    name_conditions = [
+        Inspection.id == company.inspection_id,  # Always include primary
+        func.lower(Inspection.estab_name) == func.lower(estab_name)
+    ]
+
+    if company.name and company.name.lower() != estab_name.lower():
+        name_conditions.append(func.lower(Inspection.estab_name) == func.lower(company.name))
+
+    if company.legal_name:
+        name_conditions.append(func.lower(Inspection.estab_name) == func.lower(company.legal_name))
+
+    if company.operating_name:
+        name_conditions.append(func.lower(Inspection.estab_name) == func.lower(company.operating_name))
+
+    # Build final query with OR conditions
+    query = select(Inspection).where(or_(*name_conditions)).order_by(desc(Inspection.open_date))
+
+    inspections = db.execute(query).scalars().all()
+
+    # Get violation counts for each inspection
+    items = []
+    for insp in inspections:
+        violation_count = db.execute(
+            select(func.count(Violation.id)).where(Violation.activity_nr == insp.activity_nr)
+        ).scalar() or 0
+
+        items.append(RelatedInspectionItem(
+            id=insp.id,
+            activity_nr=insp.activity_nr,
+            estab_name=insp.estab_name,
+            site_city=insp.site_city,
+            site_state=insp.site_state,
+            open_date=insp.open_date.isoformat() if insp.open_date else None,
+            close_case_date=insp.close_case_date.isoformat() if insp.close_case_date else None,
+            total_current_penalty=float(insp.total_current_penalty) if insp.total_current_penalty else None,
+            violation_count=violation_count,
+            is_primary=(insp.id == company.inspection_id)
+        ))
+
+    return RelatedInspectionsResponse(
+        company_id=company.id,
+        company_name=company.name,
+        inspections=items,
+        total=len(items)
+    )

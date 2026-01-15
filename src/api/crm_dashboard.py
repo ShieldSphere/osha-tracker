@@ -1152,7 +1152,7 @@ async def crm_page():
                 <div id="sync-widget-manual" class="text-[10px] text-gray-600 space-y-1">No manual syncs yet</div>
             </div>
             <div class="pt-1 border-t border-gray-100">
-                <a href="/api/inspections/cron/status" target="_blank" class="text-[10px] text-blue-600 hover:text-blue-800">View full sync history →</a>
+                <a href="/api/inspections/cron/status?format=html" target="_blank" class="text-[10px] text-blue-600 hover:text-blue-800">View full sync history →</a>
             </div>
         </div>
     </div>
