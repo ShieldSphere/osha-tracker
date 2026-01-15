@@ -439,6 +439,14 @@ class EPASyncService:
             logger.info("No valid EPA cases to sync")
             return stats
 
+        # Deduplicate cases by case_number (same case can appear in multiple states)
+        # Keep the last occurrence (most recent data)
+        seen_case_numbers = {}
+        for case in parsed_cases:
+            seen_case_numbers[case["case_number"]] = case
+        parsed_cases = list(seen_case_numbers.values())
+        logger.info(f"EPA bulk sync: {len(parsed_cases)} unique cases after deduplication")
+
         logger.info(f"EPA bulk sync: Upserting {len(parsed_cases)} cases to database...")
 
         # Bulk upsert using PostgreSQL ON CONFLICT
