@@ -127,6 +127,31 @@ async def health_check():
     return {"status": "healthy", "service": "osha-tracker"}
 
 
+@app.get("/api/debug/routes")
+async def debug_routes():
+    """Debug endpoint to list all registered routes."""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            routes.append({
+                "path": route.path,
+                "methods": list(route.methods) if route.methods else [],
+                "name": route.name if hasattr(route, 'name') else None
+            })
+        elif hasattr(route, 'path'):
+            routes.append({
+                "path": route.path,
+                "type": type(route).__name__
+            })
+    # Filter to EPA routes for easier debugging
+    epa_routes = [r for r in routes if '/epa' in r.get('path', '')]
+    return {
+        "total_routes": len(routes),
+        "epa_routes": epa_routes,
+        "all_api_routes": [r for r in routes if r.get('path', '').startswith('/api')]
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
