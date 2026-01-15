@@ -602,24 +602,62 @@ async def epa_dashboard():
             const statusEl = document.getElementById('sync-status');
             statusEl.textContent = 'Syncing...';
 
+            const startTime = performance.now();
+            console.log('%c[EPA Sync] Starting...', 'color: #059669; font-weight: bold');
+            console.log('[EPA Sync] Parameters: days_back=90, states=AL,AR,FL,GA,KY,LA,MS,NC,SC,TN,TX,VA,WV');
+
+            // Update manual sync widget to show running status
+            if (window.updateManualSyncStatus) {
+                window.updateManualSyncStatus('EPA', 'running', 'syncing...');
+            }
+
             try {
+                console.log('[EPA Sync] Sending POST request to API...');
                 const response = await fetch(`${API_BASE}/sync?days_back=90`, { method: 'POST' });
+                console.log(`[EPA Sync] Response status: ${response.status}`);
+
                 const data = await response.json();
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
 
                 if (data.success) {
+                    console.log('%c[EPA Sync] Request accepted', 'color: #2563eb; font-weight: bold');
+                    console.log(`[EPA Sync] Initial response after ${elapsed}s:`, data);
+                    if (data.stats) {
+                        console.log('%c[EPA Sync] Sync completed synchronously!', 'color: #16a34a; font-weight: bold');
+                        console.table({
+                            'Total fetched': data.stats.total_fetched,
+                            'New cases': data.stats.new,
+                            'Updated cases': data.stats.updated,
+                            'Errors': data.stats.errors
+                        });
+                        // Sync completed synchronously - update widget immediately
+                        if (window.updateManualSyncStatus) {
+                            window.updateManualSyncStatus('EPA', 'success', `+${data.stats.new} new`);
+                        }
+                    }
                     statusEl.textContent = 'EPA sync running...';
                     const runId = data.stats?.run_id || null;
-                    startSyncPolling(runId);
+                    startSyncPolling(runId, startTime);
                 } else {
+                    console.error('%c[EPA Sync] Failed', 'color: #dc2626; font-weight: bold');
+                    console.error('[EPA Sync] Response:', data);
+                    if (window.updateManualSyncStatus) {
+                        window.updateManualSyncStatus('EPA', 'failed', data.detail || 'Unknown error');
+                    }
                     statusEl.textContent = 'Sync failed';
                 }
             } catch (e) {
-                console.error('Sync error:', e);
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+                console.error(`%c[EPA Sync] Error after ${elapsed}s`, 'color: #dc2626; font-weight: bold');
+                console.error('[EPA Sync] Error:', e);
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('EPA', 'failed', e.message);
+                }
                 statusEl.textContent = 'Sync error';
             }
         }
 
-        function startSyncPolling(runId) {
+        function startSyncPolling(runId, startTime) {
             const statusEl = document.getElementById('sync-status');
 
             if (syncPollTimer) {
@@ -629,6 +667,7 @@ async def epa_dashboard():
 
             let attempts = 0;
             const maxAttempts = 40;
+            console.log('[EPA Sync] Starting status polling...');
 
             syncPollTimer = setInterval(async () => {
                 attempts += 1;
@@ -640,11 +679,14 @@ async def epa_dashboard():
                     const payload = await response.json();
                     const latest = payload.latest;
                     if (!latest) {
+                        console.log(`[EPA Sync] Poll #${attempts}: No status yet`);
                         return;
                     }
 
                     if (runId && latest.id !== runId) {
+                        console.log(`[EPA Sync] Poll #${attempts}: Waiting for run ${runId}, got ${latest.id}`);
                         if (attempts >= maxAttempts) {
+                            console.warn('[EPA Sync] Status polling timed out');
                             statusEl.textContent = 'EPA sync running (status timeout)';
                             clearInterval(syncPollTimer);
                             syncPollTimer = null;
@@ -653,23 +695,43 @@ async def epa_dashboard():
                     }
 
                     if (latest.status === 'running') {
+                        console.log(`[EPA Sync] Poll #${attempts}: Still running...`);
                         statusEl.textContent = 'EPA sync running...';
                         return;
                     }
 
+                    const totalElapsed = startTime ? ((performance.now() - startTime) / 1000).toFixed(1) : '?';
                     let added = null;
+                    let details = null;
                     if (latest.details) {
                         try {
-                            const details = JSON.parse(latest.details);
+                            details = JSON.parse(latest.details);
                             added = details?.new;
                         } catch (e) {}
                     }
 
                     if (latest.status === 'success') {
+                        console.log(`%c[EPA Sync] Complete! Total time: ${totalElapsed}s`, 'color: #16a34a; font-weight: bold');
+                        if (details) {
+                            console.table({
+                                'Total fetched': details.total_fetched,
+                                'New cases': details.new,
+                                'Updated cases': details.updated,
+                                'Errors': details.errors
+                            });
+                        }
+                        if (window.updateManualSyncStatus) {
+                            window.updateManualSyncStatus('EPA', 'success', `+${added ?? 0} new`);
+                        }
                         statusEl.textContent = `EPA sync completed${added !== null ? ` (added ${added})` : ''}`;
                         loadStats();
                         loadCases();
                     } else {
+                        console.error(`%c[EPA Sync] Failed after ${totalElapsed}s`, 'color: #dc2626; font-weight: bold');
+                        console.error('[EPA Sync] Error:', latest.error);
+                        if (window.updateManualSyncStatus) {
+                            window.updateManualSyncStatus('EPA', 'failed', latest.error || 'Unknown error');
+                        }
                         statusEl.textContent = 'EPA sync failed';
                     }
 
@@ -677,7 +739,9 @@ async def epa_dashboard():
                     syncPollTimer = null;
                     setTimeout(() => { statusEl.textContent = ''; }, 8000);
                 } catch (e) {
+                    console.error(`[EPA Sync] Poll #${attempts} error:`, e.message);
                     if (attempts >= maxAttempts) {
+                        console.error('[EPA Sync] Polling failed after max attempts');
                         statusEl.textContent = 'EPA sync status unknown';
                         clearInterval(syncPollTimer);
                         syncPollTimer = null;
@@ -786,8 +850,8 @@ async def epa_dashboard():
                 ];
                 cronContent.innerHTML = cronLines.map(line => `<div>${line}</div>`).join('');
 
-                // Manual section
-                manualContent.innerHTML = '<div class="text-gray-400">Use header buttons to trigger manual syncs</div>';
+                // For manual section, load from localStorage (don't overwrite)
+                loadSavedManualStatus();
             }
 
             async function loadSyncWidget() {

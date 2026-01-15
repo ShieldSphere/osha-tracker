@@ -3096,11 +3096,32 @@ async def osha_dashboard():
         async function triggerInspectionSync() {
             if (!confirm('Sync OSHA inspection records?\\n\\nThis fetches new inspections from the DOL API.')) return;
 
+            const startTime = performance.now();
+            console.log('%c[OSHA Inspection Sync] Starting...', 'color: #2563eb; font-weight: bold');
+            console.log('[OSHA Inspection Sync] Parameters: days_back=90, max_requests=10');
+
             try {
                 if (window.updateManualSyncStatus) {
                     window.updateManualSyncStatus('Inspections', 'running', 'syncing...');
                 }
-                const result = await fetch(`${API_BASE}/sync?days_back=90&max_requests=10`, { method: 'POST' }).then(r => r.json());
+                console.log('[OSHA Inspection Sync] Sending POST request to API...');
+                const response = await fetch(`${API_BASE}/sync?days_back=90&max_requests=10`, { method: 'POST' });
+                console.log(`[OSHA Inspection Sync] Response status: ${response.status}`);
+
+                const result = await response.json();
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+
+                console.log('%c[OSHA Inspection Sync] Complete!', 'color: #16a34a; font-weight: bold');
+                console.log(`[OSHA Inspection Sync] Duration: ${elapsed}s`);
+                console.log('[OSHA Inspection Sync] Results:', result);
+                console.table({
+                    'Fetched': result.fetched,
+                    'Created': result.created,
+                    'Updated': result.updated,
+                    'Skipped (old)': result.skipped_old || 0,
+                    'Skipped (non-SE)': result.skipped_state || 0,
+                    'Errors': result.errors
+                });
 
                 let message = `Inspection Sync Complete!\\n\\n`;
                 message += `Fetched: ${result.fetched}\\n`;
@@ -3111,7 +3132,7 @@ async def osha_dashboard():
                 message += `Errors: ${result.errors}`;
 
                 if (result.logs && result.logs.length > 0) {
-                    console.log('Sync logs:', result.logs);
+                    console.log('[OSHA Inspection Sync] Server logs:', result.logs);
                 }
 
                 if (window.updateManualSyncStatus) {
@@ -3120,6 +3141,9 @@ async def osha_dashboard():
                 alert(message);
                 loadInspections();
             } catch (e) {
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+                console.error(`%c[OSHA Inspection Sync] Failed after ${elapsed}s`, 'color: #dc2626; font-weight: bold');
+                console.error('[OSHA Inspection Sync] Error:', e);
                 if (window.updateManualSyncStatus) {
                     window.updateManualSyncStatus('Inspections', 'failed', e.message);
                 }
@@ -3130,11 +3154,32 @@ async def osha_dashboard():
         async function triggerViolationSync() {
             if (!confirm('Sync violations for existing inspections?\\n\\nThis checks inspections from the past year for new citations/penalties.')) return;
 
+            const startTime = performance.now();
+            console.log('%c[OSHA Violation Sync] Starting...', 'color: #7c3aed; font-weight: bold');
+            console.log('[OSHA Violation Sync] Parameters: inspection_days_back=365, max_inspections=200, max_requests=50');
+
             try {
                 if (window.updateManualSyncStatus) {
                     window.updateManualSyncStatus('Violations', 'running', 'syncing...');
                 }
-                const result = await fetch(`${API_BASE}/sync/violations-recent?inspection_days_back=365&max_inspections=200&max_requests=50`, { method: 'POST' }).then(r => r.json());
+                console.log('[OSHA Violation Sync] Sending POST request to API...');
+                const response = await fetch(`${API_BASE}/sync/violations-recent?inspection_days_back=365&max_inspections=200&max_requests=50`, { method: 'POST' });
+                console.log(`[OSHA Violation Sync] Response status: ${response.status}`);
+
+                const result = await response.json();
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+
+                console.log('%c[OSHA Violation Sync] Complete!', 'color: #16a34a; font-weight: bold');
+                console.log(`[OSHA Violation Sync] Duration: ${elapsed}s`);
+                console.log('[OSHA Violation Sync] Results:', result);
+                console.table({
+                    'Inspections checked': result.inspections_checked,
+                    'Violations fetched': result.violations_fetched,
+                    'New violations': result.violations_inserted,
+                    'Updated violations': result.violations_updated,
+                    'Inspections with new': result.inspections_with_new_violations,
+                    'Errors': result.errors
+                });
 
                 let message = `Violation Sync Complete!\\n\\n`;
                 message += `Inspections checked: ${result.inspections_checked}\\n`;
@@ -3145,7 +3190,7 @@ async def osha_dashboard():
                 message += `Errors: ${result.errors}`;
 
                 if (result.logs && result.logs.length > 0) {
-                    console.log('Violation sync logs:', result.logs);
+                    console.log('[OSHA Violation Sync] Server logs:', result.logs);
                 }
 
                 if (window.updateManualSyncStatus) {
@@ -3155,6 +3200,9 @@ async def osha_dashboard():
                 loadInspections();
                 loadNewViolations();
             } catch (e) {
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+                console.error(`%c[OSHA Violation Sync] Failed after ${elapsed}s`, 'color: #dc2626; font-weight: bold');
+                console.error('[OSHA Violation Sync] Error:', e);
                 if (window.updateManualSyncStatus) {
                     window.updateManualSyncStatus('Violations', 'failed', e.message);
                 }
@@ -4060,11 +4108,6 @@ If you'd like to chat about your situation, I'm happy to help.`;
                 const runs = data.runs || [];
                 const latest = data.latest || {};
 
-                // Separate cron vs manual runs
-                // Cron jobs typically have specific job names, manual syncs come from different endpoints
-                const cronJobNames = ['inspections', 'violations-bulk', 'epa'];
-                const manualJobNames = ['manual-inspections', 'manual-violations', 'manual-epa'];
-
                 // Render cron section using latest
                 const cronLines = [
                     formatLine('Inspections', latest.inspections, 'inspections'),
@@ -4073,9 +4116,8 @@ If you'd like to chat about your situation, I'm happy to help.`;
                 ];
                 cronContent.innerHTML = cronLines.map(line => `<div>${line}</div>`).join('');
 
-                // For manual section, show the last manual sync from the runs list
-                // Manual syncs don't go through cron tracking, so we'll show sync/status info
-                manualContent.innerHTML = '<div class="text-gray-400">Use header buttons to trigger manual syncs</div>';
+                // For manual section, load from localStorage (don't overwrite)
+                loadSavedManualStatus();
             }
 
             async function loadSyncWidget() {
