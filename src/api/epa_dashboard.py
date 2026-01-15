@@ -210,6 +210,7 @@ async def epa_dashboard():
         let currentSortDesc = true;
         let totalPages = 1;
         let searchTimeout = null;
+        let syncPollTimer = null;
 
         // Law badge colors
         const lawColors = {
@@ -606,13 +607,9 @@ async def epa_dashboard():
                 const data = await response.json();
 
                 if (data.success) {
-                    statusEl.textContent = 'Sync started!';
-                    // Reload data after a delay
-                    setTimeout(() => {
-                        loadStats();
-                        loadCases();
-                        statusEl.textContent = '';
-                    }, 5000);
+                    statusEl.textContent = 'EPA sync running...';
+                    const runId = data.stats?.run_id || null;
+                    startSyncPolling(runId);
                 } else {
                     statusEl.textContent = 'Sync failed';
                 }
@@ -621,15 +618,98 @@ async def epa_dashboard():
                 statusEl.textContent = 'Sync error';
             }
         }
+
+        function startSyncPolling(runId) {
+            const statusEl = document.getElementById('sync-status');
+
+            if (syncPollTimer) {
+                clearInterval(syncPollTimer);
+                syncPollTimer = null;
+            }
+
+            let attempts = 0;
+            const maxAttempts = 40;
+
+            syncPollTimer = setInterval(async () => {
+                attempts += 1;
+                try {
+                    const response = await fetch(`${API_BASE}/sync/status`);
+                    if (!response.ok) {
+                        throw new Error('Status unavailable');
+                    }
+                    const payload = await response.json();
+                    const latest = payload.latest;
+                    if (!latest) {
+                        return;
+                    }
+
+                    if (runId && latest.id !== runId) {
+                        if (attempts >= maxAttempts) {
+                            statusEl.textContent = 'EPA sync running (status timeout)';
+                            clearInterval(syncPollTimer);
+                            syncPollTimer = null;
+                        }
+                        return;
+                    }
+
+                    if (latest.status === 'running') {
+                        statusEl.textContent = 'EPA sync running...';
+                        return;
+                    }
+
+                    let added = null;
+                    if (latest.details) {
+                        try {
+                            const details = JSON.parse(latest.details);
+                            added = details?.new;
+                        } catch (e) {}
+                    }
+
+                    if (latest.status === 'success') {
+                        statusEl.textContent = `EPA sync completed${added !== null ? ` (added ${added})` : ''}`;
+                        loadStats();
+                        loadCases();
+                    } else {
+                        statusEl.textContent = 'EPA sync failed';
+                    }
+
+                    clearInterval(syncPollTimer);
+                    syncPollTimer = null;
+                    setTimeout(() => { statusEl.textContent = ''; }, 8000);
+                } catch (e) {
+                    if (attempts >= maxAttempts) {
+                        statusEl.textContent = 'EPA sync status unknown';
+                        clearInterval(syncPollTimer);
+                        syncPollTimer = null;
+                    }
+                }
+            }, 3000);
+        }
     </script>
 
-    <div id="sync-widget" class="fixed bottom-4 right-4 z-50 w-80 bg-white border border-gray-200 rounded-lg shadow-lg">
+    <div id="sync-widget" class="fixed bottom-4 right-4 z-50 w-96 bg-white border border-gray-200 rounded-lg shadow-lg">
         <div class="flex items-center justify-between px-3 py-2 border-b bg-gray-50">
             <span class="text-xs font-semibold text-gray-800">Sync Status</span>
             <button id="sync-widget-toggle" class="text-xs text-blue-600 hover:text-blue-800">Hide</button>
         </div>
-        <div id="sync-widget-body" class="px-3 py-2">
-            <div id="sync-widget-content" class="text-[10px] text-gray-600 space-y-1">Loading...</div>
+        <div id="sync-widget-body" class="px-3 py-2 space-y-3">
+            <div>
+                <div class="text-[10px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Automatic (Cron)
+                </div>
+                <div id="sync-widget-cron" class="text-[10px] text-gray-600 space-y-0.5 pl-4">Loading...</div>
+            </div>
+            <div>
+                <div class="text-[10px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+                    Manual
+                </div>
+                <div id="sync-widget-manual" class="text-[10px] text-gray-600 space-y-0.5 pl-4">Loading...</div>
+            </div>
+            <div class="pt-1 border-t">
+                <a href="/api/inspections/cron/status" target="_blank" class="text-[10px] text-blue-600 hover:text-blue-800">View full sync history</a>
+            </div>
         </div>
     </div>
     <script>
@@ -638,7 +718,8 @@ async def epa_dashboard():
             if (!widget) return;
             const body = document.getElementById('sync-widget-body');
             const toggle = document.getElementById('sync-widget-toggle');
-            const content = document.getElementById('sync-widget-content');
+            const cronContent = document.getElementById('sync-widget-cron');
+            const manualContent = document.getElementById('sync-widget-manual');
             let cronEventSource = null;
             let lastRunId = 0;
             let reconnectTimer = null;
@@ -670,60 +751,66 @@ async def epa_dashboard():
                 }
             }
 
-            function getAddedCount(label, details) {
+            function getAddedCount(jobName, details) {
                 if (!details) return 'n/a';
-                if (label === 'Inspections') return details.new_inspections_added ?? 0;
-                if (label === 'Violations') return details.new_violations_found ?? 0;
-                if (label === 'EPA') return details.new ?? 0;
+                if (jobName === 'inspections') return details.created ?? details.new_inspections_added ?? 0;
+                if (jobName === 'violations-bulk') return details.violations_inserted ?? details.new_violations_found ?? 0;
+                if (jobName === 'epa') return details.new ?? 0;
                 return 'n/a';
             }
 
-            function formatLine(label, run) {
-                if (!run) return `${label}: n/a`;
+            function formatLine(label, run, jobName) {
+                if (!run) return `<span class="text-gray-400">${label}: No data</span>`;
                 const status = run.status || 'unknown';
+                const statusColor = status === 'success' ? 'text-green-600' : status === 'failed' ? 'text-red-600' : 'text-yellow-600';
                 const end = formatTime(run.finished_at);
                 const details = parseDetails(run.details);
-                const added = getAddedCount(label, details);
-                return `${label}: ${status} | ${end} | added ${added}`;
+                const added = getAddedCount(jobName, details);
+                return `${label}: <span class="${statusColor}">${status}</span> | ${end} | +${added}`;
             }
 
-            function getLatestRunId(latest) {
-                const ids = Object.values(latest || {}).map(entry => entry?.id || 0);
-                return ids.length ? Math.max(...ids) : 0;
+            function getLatestRunId(runs) {
+                if (!runs || !runs.length) return 0;
+                return Math.max(...runs.map(r => r.id || 0));
             }
 
-            function renderSyncStatus(latest) {
-                const lines = [
-                    formatLine('Inspections', latest.inspections),
-                    formatLine('Violations', latest.violations),
-                    formatLine('EPA', latest.epa),
+            function renderSyncStatus(data) {
+                const runs = data.runs || [];
+                const latest = data.latest || {};
+
+                // Render cron section using latest
+                const cronLines = [
+                    formatLine('Inspections', latest.inspections, 'inspections'),
+                    formatLine('Violations', latest['violations-bulk'], 'violations-bulk'),
+                    formatLine('EPA', latest.epa, 'epa'),
                 ];
+                cronContent.innerHTML = cronLines.map(line => `<div>${line}</div>`).join('');
 
-                content.innerHTML = [
-                    ...lines.map(line => `<div>${line}</div>`),
-                    `<div><a href="/api/inspections/cron/status" target="_blank" class="text-blue-600 hover:text-blue-800">View sync history</a></div>`
-                ].join('');
+                // Manual section
+                manualContent.innerHTML = '<div class="text-gray-400">Use header buttons to trigger manual syncs</div>';
             }
 
             async function loadSyncWidget() {
                 try {
                     const response = await fetch('/api/inspections/cron/status');
                     if (response.status === 401) {
-                        content.textContent = 'Sync status unavailable (unauthorized).';
+                        cronContent.textContent = 'Unavailable (unauthorized)';
+                        manualContent.textContent = 'Unavailable (unauthorized)';
                         return false;
                     }
                     if (!response.ok) {
-                        content.textContent = 'Sync status unavailable.';
+                        cronContent.textContent = 'Unavailable';
+                        manualContent.textContent = 'Unavailable';
                         return false;
                     }
 
                     const data = await response.json();
-                    const latest = data.latest || {};
-                    renderSyncStatus(latest);
-                    lastRunId = getLatestRunId(latest);
+                    renderSyncStatus(data);
+                    lastRunId = getLatestRunId(data.runs);
                     return true;
                 } catch (e) {
-                    content.textContent = 'Sync status unavailable.';
+                    cronContent.textContent = 'Unavailable';
+                    manualContent.textContent = 'Unavailable';
                     return false;
                 }
             }
@@ -739,7 +826,7 @@ async def epa_dashboard():
                     try {
                         const payload = JSON.parse(event.data || '{}');
                         if (payload.latest) {
-                            renderSyncStatus(payload.latest);
+                            renderSyncStatus({ latest: payload.latest, runs: [] });
                         }
                         if (payload.run_id) {
                             lastRunId = payload.run_id;
@@ -763,6 +850,32 @@ async def epa_dashboard():
                 };
             }
 
+            // Expose function to update manual sync status from outside
+            window.updateManualSyncStatus = function(type, status, details) {
+                const statusColor = status === 'success' ? 'text-green-600' : status === 'failed' ? 'text-red-600' : 'text-yellow-600';
+                const time = new Date().toLocaleString();
+                manualContent.innerHTML = `<div>${type}: <span class="${statusColor}">${status}</span> | ${time} | ${details}</div>`;
+                // Persist to localStorage
+                const saved = JSON.parse(localStorage.getItem('manualSyncStatus') || '{}');
+                saved[type] = { status, details, time };
+                localStorage.setItem('manualSyncStatus', JSON.stringify(saved));
+            };
+
+            // Load saved manual sync status from localStorage
+            function loadSavedManualStatus() {
+                const saved = JSON.parse(localStorage.getItem('manualSyncStatus') || '{}');
+                const entries = Object.entries(saved);
+                if (entries.length === 0) {
+                    manualContent.textContent = 'No manual syncs yet';
+                    return;
+                }
+                manualContent.innerHTML = entries.map(([type, data]) => {
+                    const statusColor = data.status === 'success' ? 'text-green-600' : data.status === 'failed' ? 'text-red-600' : 'text-yellow-600';
+                    return `<div>${type}: <span class="${statusColor}">${data.status}</span> | ${data.time} | ${data.details}</div>`;
+                }).join('');
+            }
+
+            loadSavedManualStatus();
             loadSyncWidget().then((ok) => {
                 if (ok) startSyncStream();
             });

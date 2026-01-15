@@ -15,7 +15,6 @@ async def osha_dashboard():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TSG Safety Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         .loader {
             border: 3px solid #f3f3f3;
@@ -58,15 +57,11 @@ async def osha_dashboard():
                     </div>
                 </div>
                 <div class="flex items-center gap-4">
-                    <span id="sync-status" class="text-sm text-gray-400"></span>
                     <button onclick="openEnrichedCompaniesModal()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded flex items-center gap-2 text-sm">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
                         </svg>
                         Enriched Companies
-                    </button>
-                    <button onclick="openChartsModal()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
-                        Charts
                     </button>
                     <button onclick="triggerInspectionSync()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
                         Sync Inspections
@@ -326,32 +321,6 @@ async def osha_dashboard():
         </div>
     </div>
 
-    <!-- Charts Modal -->
-    <div id="charts-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div class="p-6 border-b flex justify-between items-center">
-                <h2 class="text-xl font-semibold">Inspection Statistics</h2>
-                <button onclick="closeChartsModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-            </div>
-            <div class="p-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <h3 class="text-lg font-semibold mb-4">Inspections by State</h3>
-                        <div style="height: 300px; position: relative;">
-                            <canvas id="chart-states"></canvas>
-                        </div>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold mb-4">Inspections by Type</h3>
-                        <div style="height: 300px; position: relative;">
-                            <canvas id="chart-types"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- New Inspections Modal -->
     <div id="new-inspections-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
         <div class="bg-white rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[90vh] flex flex-col">
@@ -419,8 +388,6 @@ async def osha_dashboard():
         let currentSortDesc = true;
         let totalPages = 1;
         let searchTimeout = null;
-        let statesChart = null;
-        let typesChart = null;
         let draggedColumn = null;
 
         // Column definitions - order can be changed by drag and drop
@@ -451,7 +418,6 @@ async def osha_dashboard():
             loadFilters();
             loadStats();
             loadInspections();
-            loadSyncStatus();
             loadCronStatus();
             loadDateRange();
             loadNewInspections();
@@ -1420,18 +1386,29 @@ async def osha_dashboard():
                                 <p class="text-xs text-gray-500 uppercase tracking-wider"># Employees</p>
                                 <p class="mt-1 text-sm font-medium text-gray-900">${inspection.nr_in_estab || '-'}</p>
                             </div>
-                            <div>
+                            <div id="enrichment-status-container-${inspection.id}">
                                 <p class="text-xs text-gray-500 uppercase tracking-wider">Enrichment</p>
                                 <p class="mt-1 flex items-center gap-2">
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                        inspection.enrichment_status === 'completed' ? 'bg-green-100 text-green-800' :
-                                        inspection.enrichment_status === 'failed' ? 'bg-red-100 text-red-800' :
-                                        inspection.enrichment_status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                                        'bg-gray-100 text-gray-800'
-                                    }">
-                                        ${inspection.enrichment_status || 'pending'}
-                                    </span>
-                                    ${inspection.enrichment_status !== 'completed' ? `
+                                    ${inspection.enrichment_status === 'completed' ? `
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                            completed
+                                        </span>
+                                        <button onclick="reEnrichInspection(${inspection.id})"
+                                            id="enrich-btn-${inspection.id}"
+                                            class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
+                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                            </svg>
+                                            Re-enrich
+                                        </button>
+                                    ` : `
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                            inspection.enrichment_status === 'failed' ? 'bg-red-100 text-red-800' :
+                                            inspection.enrichment_status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                                            'bg-gray-100 text-gray-800'
+                                        }">
+                                            ${inspection.enrichment_status || 'pending'}
+                                        </span>
                                         <button onclick="enrichInspection(${inspection.id})"
                                             id="enrich-btn-${inspection.id}"
                                             class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200">
@@ -1440,7 +1417,7 @@ async def osha_dashboard():
                                             </svg>
                                             Enrich
                                         </button>
-                                    ` : ''}
+                                    `}
                                 </p>
                             </div>
                         </div>
@@ -1457,10 +1434,8 @@ async def osha_dashboard():
                 `;
                 document.getElementById('modal').classList.remove('hidden');
 
-                // Load company data if already enriched
-                if (inspection.enrichment_status === 'completed') {
-                    loadCompanyData(inspection.id);
-                }
+                // Always try to load company data (may come from related inspection)
+                loadCompanyDataOrRelated(inspection.id);
 
                 // Check if inspection is already in CRM
                 checkCRMStatus(inspection.id);
@@ -1526,38 +1501,40 @@ async def osha_dashboard():
             }
 
             try {
-                // Run web enrichment directly (no preview modal)
+                // Run public enrichment directly (no preview modal)
                 const webResponse = await fetch(`/api/enrichment/web-enrich/${inspectionId}?quick=false`, { method: 'POST' });
                 const webResult = await webResponse.json();
 
-                if (!webResult.success && !webResult.data) {
-                    throw new Error(webResult.error || 'Web enrichment failed');
+                if (!webResult.success || !webResult.data) {
+                    const message = webResult.error || 'No public data found';
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = 'Enrich';
+                    }
+                    alert(`Enrichment not found: ${message}`);
+                    return;
                 }
 
-                // Save the web enrichment data
+                // Save the enrichment data
                 const saveResponse = await fetch(`/api/enrichment/save-web-enrichment/${inspectionId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         data: webResult.data || {},
                         website_url: webResult.website_url,
-                        confidence: webResult.confidence || 'medium'
+                        confidence: webResult.confidence || 'medium',
+                        source: webResult.source || 'public'
                     })
                 });
 
                 const saveResult = await saveResponse.json();
 
                 if (saveResult.success) {
-                    // Update button to show enriched
-                    if (btn) {
-                        btn.classList.remove('bg-blue-100', 'text-blue-700');
-                        btn.classList.add('bg-green-100', 'text-green-700');
-                        btn.innerHTML = 'Enriched';
-                        btn.disabled = true;
-                    }
+                    // Update the enrichment status container to show completed + re-enrich button
+                    updateEnrichmentStatusDisplay(inspectionId, 'completed');
 
                     // Load and display the company data
-                    await loadCompanyData(inspectionId);
+                    await loadCompanyDataOrRelated(inspectionId);
                 } else {
                     throw new Error(saveResult.error || 'Failed to save enrichment');
                 }
@@ -1569,6 +1546,37 @@ async def osha_dashboard():
                 }
                 alert('Enrichment failed: ' + e.message);
             }
+        }
+
+        // Update the enrichment status display after enrichment completes
+        function updateEnrichmentStatusDisplay(inspectionId, status) {
+            const container = document.getElementById(`enrichment-status-container-${inspectionId}`);
+            if (!container) return;
+
+            if (status === 'completed') {
+                container.innerHTML = `
+                    <p class="text-xs text-gray-500 uppercase tracking-wider">Enrichment</p>
+                    <p class="mt-1 flex items-center gap-2">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                            completed
+                        </span>
+                        <button onclick="reEnrichInspection(${inspectionId})"
+                            id="enrich-btn-${inspectionId}"
+                            class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200">
+                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            Re-enrich
+                        </button>
+                    </p>
+                `;
+            }
+        }
+
+        // Re-enrich an already enriched inspection
+        async function reEnrichInspection(inspectionId) {
+            if (!confirm('Re-enrich this company? This will fetch fresh data from public sources.')) return;
+            await enrichInspection(inspectionId);
         }
 
         // Open Apollo enrichment modal for an already web-enriched company
@@ -1717,7 +1725,7 @@ async def osha_dashboard():
                         <div class="mb-4 p-3 bg-gray-100 rounded-lg border">
                             <p class="text-sm text-gray-700 font-medium mb-2">Enrichment Options:</p>
                             <div class="text-xs text-gray-600 space-y-1">
-                                <p><strong>Web Scraping (Free):</strong> Searches DuckDuckGo, LinkedIn, Secretary of State. Uses OpenAI to extract data. Results are saved and can be edited.</p>
+                                <p><strong>Public Enrichment (Free):</strong> Uses public listings/registries (OpenStreetMap, OpenCorporates). Results are saved and can be edited.</p>
                                 <p><strong>Apollo (Credits):</strong> Uses Apollo API for verified company & contact data. Best when you have a domain/website.</p>
                             </div>
                         </div>
@@ -1738,7 +1746,7 @@ async def osha_dashboard():
                                     <svg class="w-4 h-4 mr-1.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
                                     </svg>
-                                    Web Scrape (Free)
+                                    Public Enrich (Free)
                                 </button>
                             </div>
 
@@ -2270,7 +2278,7 @@ async def osha_dashboard():
             }
         }
 
-        // Run web enrichment only (free) - finds website, scrapes data, saves to database
+        // Run public enrichment only (free) - uses public sources and saves to database
         async function runWebEnrichmentOnly(inspectionId) {
             const btn = document.getElementById('btn-web-enrich');
             const resultContainer = document.getElementById('web-enrichment-result-actions');
@@ -2293,15 +2301,15 @@ async def osha_dashboard():
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                         </svg>
-                        <h3 class="font-medium text-blue-900">Searching for company information...</h3>
+                        <h3 class="font-medium text-blue-900">Searching public sources...</h3>
                     </div>
-                    <p class="text-sm text-blue-700">This may take 30-60 seconds (searches DuckDuckGo, LinkedIn, Secretary of State, etc.)</p>
-                    <p class="text-xs text-blue-600 mt-1">Looking for DBA names, alternate company names, and official website...</p>
+                    <p class="text-sm text-blue-700">This may take 30-60 seconds (OpenStreetMap + OpenCorporates).</p>
+                    <p class="text-xs text-blue-600 mt-1">Looking for address, phone, ownership, and business registry info...</p>
                 </div>
             `;
 
             try {
-                // Run FULL web enrichment (not quick mode)
+                // Run FULL public enrichment (not quick mode)
                 const response = await fetch(`/api/enrichment/web-enrich/${inspectionId}?quick=false`, { method: 'POST' });
                 const webResult = await response.json();
                 console.log('Web enrichment result:', webResult);
@@ -2316,7 +2324,7 @@ async def osha_dashboard():
                                 <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                                 </svg>
-                                <h3 class="font-medium text-green-900">Web Scraping Complete</h3>
+                                <h3 class="font-medium text-green-900">Public Enrichment Complete</h3>
                                 ${webResult.confidence ? `<span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">${webResult.confidence} confidence</span>` : ''}
                             </div>
 
@@ -2327,8 +2335,8 @@ async def osha_dashboard():
                                 ${data.phone || data.contact_info?.main_phone ? `<p><strong>Phone:</strong> ${escapeHtml(data.phone || data.contact_info?.main_phone)}</p>` : ''}
                                 ${data.email || data.contact_info?.main_email ? `<p><strong>Email:</strong> ${escapeHtml(data.email || data.contact_info?.main_email)}</p>` : ''}
                                 ${data.industry ? `<p><strong>Industry:</strong> ${escapeHtml(data.industry)}</p>` : ''}
-                                ${data.employee_estimate ? `<p><strong>Employees:</strong> ${escapeHtml(data.employee_estimate)}</p>` : ''}
-                                ${data.year_established ? `<p><strong>Est.:</strong> ${escapeHtml(data.year_established)}</p>` : ''}
+                                ${(data.employee_count || data.employee_range) ? `<p><strong>Employees:</strong> ${escapeHtml(String(data.employee_count || data.employee_range))}</p>` : ''}
+                                ${data.year_founded ? `<p><strong>Est.:</strong> ${escapeHtml(String(data.year_founded))}</p>` : ''}
                                 ${data.description ? `<p class="text-gray-600 text-xs mt-2">${escapeHtml(data.description.substring(0, 200))}${data.description.length > 200 ? '...' : ''}</p>` : ''}
                             </div>
 
@@ -2368,7 +2376,7 @@ async def osha_dashboard():
                         apolloBtn.classList.remove('opacity-50');
                     }
 
-                    btn.innerHTML = 'Scraping Complete';
+                    btn.innerHTML = 'Enrichment Complete';
                     btn.classList.remove('bg-green-600', 'hover:bg-green-700');
                     btn.classList.add('bg-gray-400');
                 } else {
@@ -2378,12 +2386,12 @@ async def osha_dashboard():
                                 <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                                 </svg>
-                                <h3 class="font-medium text-yellow-900">Limited Results</h3>
-                            </div>
-                            <p class="text-sm text-yellow-700">${webResult.error || 'No website or company data found'}</p>
-                            <p class="text-sm text-yellow-600 mt-1">Try Apollo search to find company by name</p>
+                            <h3 class="font-medium text-yellow-900">Limited Results</h3>
                         </div>
-                    `;
+                        <p class="text-sm text-yellow-700">${webResult.error || 'No website or company data found'}</p>
+                        <p class="text-sm text-yellow-600 mt-1">Try Apollo search to find company by name</p>
+                    </div>
+                `;
                     btn.innerHTML = 'Try Again';
                     btn.disabled = false;
                 }
@@ -2395,11 +2403,11 @@ async def osha_dashboard():
                             <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>
-                            <h3 class="font-medium text-red-900">Web Scraping Failed</h3>
-                        </div>
-                        <p class="text-sm text-red-700">${escapeHtml(e.message || 'Unknown error')}</p>
+                        <h3 class="font-medium text-red-900">Public Enrichment Failed</h3>
                     </div>
-                `;
+                    <p class="text-sm text-red-700">${escapeHtml(e.message || 'Unknown error')}</p>
+                </div>
+            `;
                 btn.innerHTML = 'Retry';
                 btn.disabled = false;
             }
@@ -2419,7 +2427,8 @@ async def osha_dashboard():
                     body: JSON.stringify({
                         data: currentWebEnrichmentResult.data || {},
                         website_url: currentWebEnrichmentResult.website_url,
-                        confidence: currentWebEnrichmentResult.confidence || 'medium'
+                        confidence: currentWebEnrichmentResult.confidence || 'medium',
+                        source: currentWebEnrichmentResult.source || 'public'
                     })
                 });
 
@@ -2434,7 +2443,7 @@ async def osha_dashboard():
                     if (enrichBtn) {
                         enrichBtn.classList.remove('bg-blue-100', 'text-blue-700');
                         enrichBtn.classList.add('bg-green-100', 'text-green-700');
-                        enrichBtn.innerHTML = 'Enriched (Web)';
+                        enrichBtn.innerHTML = 'Enriched (Public)';
                     }
 
                     // Display the company data in the modal (if inspection modal is open)
@@ -2608,14 +2617,11 @@ async def osha_dashboard():
             }
         }
 
-        function displayCompanyData(inspectionId, result) {
-            const section = document.getElementById(`company-data-section-${inspectionId}`);
-            if (!section || !result.data) return;
-
-            const data = result.data;
-            const websiteUrl = result.website_url;
-            const confidence = result.confidence || data.confidence || 'unknown';
-
+        /**
+         * Normalize and extract company data from various API response formats.
+         * Returns a standardized object for use in display functions.
+         */
+        function normalizeCompanyData(data) {
             // Handle both API response formats (enrichment result vs stored company)
             const companyName = data.official_name || data.name;
             const employees = data.employee_range || data.employee_count || data.employee_estimate;
@@ -2644,607 +2650,100 @@ async def osha_dashboard():
             // Get contacts (from API response or key_personnel)
             const contacts = data.contacts || data.key_personnel || [];
 
-            // Confidence badge colors and labels
-            const confidenceBadge = {
-                high: { bg: 'bg-green-100', text: 'text-green-800', label: 'High Confidence' },
-                medium: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Medium Confidence' },
-                low: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Low Confidence' },
-                unknown: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Unverified' }
-            }[confidence] || { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Unknown' };
+            return {
+                companyName,
+                employees,
+                phone,
+                email,
+                city,
+                state,
+                address,
+                postalCode,
+                social,
+                registration,
+                services,
+                otherLocations,
+                contacts,
+                data // Keep original data for other fields
+            };
+        }
 
-            section.innerHTML = `
-                <div class="border-t border-gray-200">
-                    <!-- Header -->
-                    <div class="px-6 py-4 bg-green-50 border-b border-gray-200">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-3">
-                                <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">
-                                    Company Information (Enriched)
-                                </h3>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${confidenceBadge.bg} ${confidenceBadge.text}" title="Data verification confidence level">
-                                    ${confidenceBadge.label}
-                                </span>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                ${social.linkedin_url ? `
-                                    <a href="${social.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn">
-                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
-                                    </a>
-                                ` : ''}
-                                ${social.facebook_url ? `
-                                    <a href="${social.facebook_url}" target="_blank" class="text-blue-600 hover:text-blue-800" title="Facebook">
-                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-                                    </a>
-                                ` : ''}
-                                ${social.twitter_url ? `
-                                    <a href="${social.twitter_url}" target="_blank" class="text-gray-800 hover:text-black" title="Twitter/X">
-                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                                    </a>
-                                ` : ''}
-                                ${social.instagram_url ? `
-                                    <a href="${social.instagram_url}" target="_blank" class="text-pink-600 hover:text-pink-800" title="Instagram">
-                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
-                                    </a>
-                                ` : ''}
-                                ${social.youtube_url ? `
-                                    <a href="${social.youtube_url}" target="_blank" class="text-red-600 hover:text-red-800" title="YouTube">
-                                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                                    </a>
-                                ` : ''}
-                                ${websiteUrl ? `
-                                    <a href="${websiteUrl}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 ml-2 px-2 py-1 bg-blue-50 rounded">
-                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                        </svg>
-                                        Website
-                                    </a>
-                                ` : ''}
-                                <button onclick="openEmailModal(${inspectionId})" class="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 ml-2 px-2 py-1 bg-purple-50 rounded hover:bg-purple-100 transition-colors">
+        /**
+         * Build the social links HTML row.
+         */
+        function buildSocialLinksHTML(social, websiteUrl) {
+            return `
+                <div class="flex items-center gap-3 flex-wrap">
+                    ${social.linkedin_url ? `
+                        <a href="${social.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
+                        </a>
+                    ` : ''}
+                    ${social.facebook_url ? `
+                        <a href="${social.facebook_url}" target="_blank" class="text-blue-600 hover:text-blue-800" title="Facebook">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                        </a>
+                    ` : ''}
+                    ${social.twitter_url ? `
+                        <a href="${social.twitter_url}" target="_blank" class="text-gray-800 hover:text-black" title="Twitter/X">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                        </a>
+                    ` : ''}
+                    ${social.instagram_url ? `
+                        <a href="${social.instagram_url}" target="_blank" class="text-pink-600 hover:text-pink-800" title="Instagram">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+                        </a>
+                    ` : ''}
+                    ${social.youtube_url ? `
+                        <a href="${social.youtube_url}" target="_blank" class="text-red-600 hover:text-red-800" title="YouTube">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                        </a>
+                    ` : ''}
+                    ${websiteUrl ? `
+                        <a href="${websiteUrl}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 ml-2 px-2 py-1 bg-blue-50 rounded">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                            </svg>
+                            Website
+                        </a>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        /**
+         * Build the main company content HTML (shared between both modals).
+         * @param {Object} normalized - Normalized company data from normalizeCompanyData()
+         * @param {Object} options - Display options
+         * @param {number} options.companyId - Company ID (for related inspections)
+         * @param {number} options.inspectionId - Inspection ID (for action buttons)
+         * @param {boolean} options.showActions - Whether to show action buttons (Email, Apollo)
+         */
+        function buildCompanyContentHTML(normalized, options = {}) {
+            const { companyName, employees, phone, email, city, state, address, postalCode, social, registration, services, otherLocations, contacts, data } = normalized;
+            const { companyId, inspectionId, showActions = false } = options;
+            const websiteUrl = data.website;
+
+            return `
+                <div class="space-y-6">
+                    <!-- Social Links Row -->
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        ${buildSocialLinksHTML(social, websiteUrl)}
+                        ${showActions && inspectionId ? `
+                            <div class="flex items-center gap-2">
+                                <button onclick="openEmailModal(${inspectionId})" class="text-xs text-purple-600 hover:text-purple-800 flex items-center gap-1 px-2 py-1 bg-purple-50 rounded hover:bg-purple-100 transition-colors">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                                     </svg>
                                     Generate Email
                                 </button>
-                                <button onclick="openApolloEnrichmentModal(${inspectionId})" class="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 ml-2 px-2 py-1 bg-indigo-50 rounded hover:bg-indigo-100 transition-colors">
+                                <button onclick="openApolloEnrichmentModal(${inspectionId})" class="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 px-2 py-1 bg-indigo-50 rounded hover:bg-indigo-100 transition-colors">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
                                     </svg>
                                     Enrich with Apollo
                                 </button>
                             </div>
-                        </div>
-                    </div>
-
-                    <div class="px-6 py-4 space-y-6">
-                        <!-- Basic Info Grid -->
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            ${companyName ? `
-                                <div class="col-span-2">
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Official Name</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(companyName)}</p>
-                                </div>
-                            ` : ''}
-                            ${data.industry ? `
-                                <div>
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Industry</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(data.industry)}</p>
-                                </div>
-                            ` : ''}
-                            ${data.sub_industry ? `
-                                <div>
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Sub-Industry</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(data.sub_industry)}</p>
-                                </div>
-                            ` : ''}
-                            ${employees ? `
-                                <div>
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Employees</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(String(employees))}</p>
-                                </div>
-                            ` : ''}
-                            ${data.year_founded ? `
-                                <div>
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Founded</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(String(data.year_founded))} (${new Date().getFullYear() - data.year_founded} years)</p>
-                                </div>
-                            ` : ''}
-                            ${registration.business_type || data.business_type ? `
-                                <div>
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Business Type</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(registration.business_type || data.business_type)}</p>
-                                </div>
-                            ` : ''}
-                            ${registration.registration_number || data.registration_number ? `
-                                <div>
-                                    <p class="text-xs text-gray-500 uppercase tracking-wider">Registration #</p>
-                                    <p class="mt-1 text-sm font-medium text-gray-900">${escapeHtml(registration.registration_number || data.registration_number)}</p>
-                                </div>
-                            ` : ''}
-                        </div>
-
-                        <!-- Contact Info Section -->
-                        ${phone || email ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Contact Information</p>
-                                <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                    ${phone ? `
-                                        <div>
-                                            <p class="text-xs text-gray-400">Phone</p>
-                                            <a href="tel:${escapeHtml(phone)}" class="text-sm font-medium text-blue-600 hover:text-blue-800">${escapeHtml(phone)}</a>
-                                        </div>
-                                    ` : ''}
-                                    ${email ? `
-                                        <div>
-                                            <p class="text-xs text-gray-400">Email</p>
-                                            <a href="mailto:${escapeHtml(email)}" class="text-sm font-medium text-blue-600 hover:text-blue-800">${escapeHtml(email)}</a>
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            </div>
-                        ` : ''}
-
-                        <!-- Address Section -->
-                        ${address || city ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Headquarters</p>
-                                <p class="text-sm text-gray-900">
-                                    ${address ? escapeHtml(address) + '<br>' : ''}
-                                    ${[city, state, postalCode].filter(Boolean).map(escapeHtml).join(', ')}
-                                </p>
-                            </div>
-                        ` : ''}
-
-                        <!-- Other Locations -->
-                        ${otherLocations && otherLocations.length > 0 ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Other Locations</p>
-                                <div class="space-y-2">
-                                    ${otherLocations.map(loc => `
-                                        <div class="text-sm text-gray-700 flex items-start gap-2">
-                                            <svg class="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                            </svg>
-                                            <span>${escapeHtml(loc.address || loc)}${loc.type ? ` <span class="text-gray-400">(${escapeHtml(loc.type)})</span>` : ''}</span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-
-                        <!-- Description -->
-                        ${data.description ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Description</p>
-                                <p class="text-sm text-gray-700">${escapeHtml(data.description)}</p>
-                            </div>
-                        ` : ''}
-
-                        <!-- Services -->
-                        ${services && services.length > 0 ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Services</p>
-                                <div class="flex flex-wrap gap-1">
-                                    ${services.map(s => `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">${escapeHtml(s)}</span>`).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-
-                        <!-- Key Personnel / Contacts -->
-                        ${contacts && contacts.length > 0 ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-3">Key Personnel</p>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    ${contacts.map(p => `
-                                        <div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                                            <div class="flex items-start justify-between">
-                                                <div>
-                                                    <p class="text-sm font-semibold text-gray-900">${escapeHtml(p.full_name || p.name || [p.first_name, p.last_name].filter(Boolean).join(' '))}</p>
-                                                    ${p.title ? `<p class="text-xs text-gray-500">${escapeHtml(p.title)}</p>` : ''}
-                                                </div>
-                                                ${p.linkedin_url ? `
-                                                    <a href="${p.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn Profile">
-                                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
-                                                    </a>
-                                                ` : ''}
-                                            </div>
-                                            ${(p.email || p.phone) ? `
-                                                <div class="mt-2 flex flex-wrap gap-3 text-xs">
-                                                    ${p.email ? `
-                                                        <a href="mailto:${escapeHtml(p.email)}" class="text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                                                            </svg>
-                                                            ${escapeHtml(p.email)}
-                                                        </a>
-                                                    ` : ''}
-                                                    ${p.phone ? `
-                                                        <a href="tel:${escapeHtml(p.phone)}" class="text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
-                                                            </svg>
-                                                            ${escapeHtml(p.phone)}
-                                                        </a>
-                                                    ` : ''}
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-
-                        <!-- Certifications -->
-                        ${data.certifications && data.certifications.length > 0 ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Certifications</p>
-                                <div class="flex flex-wrap gap-1">
-                                    ${data.certifications.map(c => `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">${escapeHtml(c)}</span>`).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-
-                        <!-- Safety Programs -->
-                        ${data.safety_programs && data.safety_programs.length > 0 ? `
-                            <div class="border-t border-gray-100 pt-4">
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Safety Programs</p>
-                                <div class="flex flex-wrap gap-1">
-                                    ${data.safety_programs.map(s => `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">${escapeHtml(s)}</span>`).join('')}
-                                </div>
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-            `;
-        }
-
-        async function loadCompanyData(inspectionId) {
-            try {
-                const company = await fetch(`${API_BASE}/${inspectionId}/company`).then(r => r.json());
-                if (company) {
-                    displayCompanyData(inspectionId, {
-                        data: company,
-                        website_url: company.website,
-                        confidence: company.confidence
-                    });
-                }
-            } catch (e) {
-                console.error('Error loading company data:', e);
-            }
-        }
-
-        async function loadSyncStatus() {
-            try {
-                const status = await fetch(`${API_BASE}/sync/status`).then(r => r.json());
-                if (status.last_sync) {
-                    const syncDate = new Date(status.last_sync);
-                    const options = {
-                        year: 'numeric', month: 'short', day: 'numeric',
-                        hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
-                    };
-                    document.getElementById('sync-status').textContent =
-                        `Last sync: ${syncDate.toLocaleString(undefined, options)}`;
-                } else {
-                    document.getElementById('sync-status').textContent = 'Never synced';
-                }
-            } catch (e) {
-                document.getElementById('sync-status').textContent = 'Status unknown';
-            }
-        }
-
-        function formatCronTime(value) {
-            if (!value) return 'n/a';
-            const dt = new Date(value);
-            if (Number.isNaN(dt.getTime())) return 'n/a';
-            return dt.toLocaleString();
-        }
-
-        function formatCronLine(label, run) {
-            if (!run) return `${label}: n/a`;
-            const status = run.status || 'unknown';
-            const started = formatCronTime(run.started_at);
-            const finished = formatCronTime(run.finished_at);
-            const error = run.error ? ' (error)' : '';
-            return `${label}: ${status}${error} | start ${started} | ${finished}`;
-        }
-
-        async function loadCronStatus() {
-            const container = document.getElementById('cron-status');
-            if (!container) return;
-
-            try {
-                const response = await fetch(`${API_BASE}/cron/status`);
-                if (response.status === 401) {
-                    container.textContent = 'Cron status unavailable (unauthorized).';
-                    return;
-                }
-                if (!response.ok) {
-                    container.textContent = 'Cron status unavailable.';
-                    return;
-                }
-
-                const data = await response.json();
-                const latest = data.latest || {};
-                const inspections = latest.inspections;
-                const violations = latest.violations;
-
-                container.innerHTML = [
-                    formatCronLine('Inspections', inspections),
-                    formatCronLine('Violations', violations),
-                ].map(line => `<div>${line}</div>`).join('');
-            } catch (e) {
-                container.textContent = 'Cron status unavailable.';
-            }
-        }
-
-        async function triggerInspectionSync() {
-            if (!confirm('Sync OSHA inspection records?\\n\\nThis fetches new inspections from the DOL API.')) return;
-
-            try {
-                document.getElementById('sync-status').textContent = 'Syncing inspections...';
-                const result = await fetch(`${API_BASE}/sync?days_back=30&max_requests=2`, { method: 'POST' }).then(r => r.json());
-
-                let message = `Inspection Sync Complete!\\n\\n`;
-                message += `Fetched: ${result.fetched}\\n`;
-                message += `Created: ${result.created}\\n`;
-                message += `Updated: ${result.updated}\\n`;
-                message += `Skipped (old): ${result.skipped_old || 0}\\n`;
-                message += `Skipped (non-SE): ${result.skipped_state || 0}\\n`;
-                message += `Errors: ${result.errors}`;
-
-                if (result.logs && result.logs.length > 0) {
-                    console.log('Sync logs:', result.logs);
-                }
-
-                alert(message);
-                loadInspections();
-                loadSyncStatus();
-            } catch (e) {
-                alert('Inspection sync failed: ' + e.message);
-                document.getElementById('sync-status').textContent = 'Sync failed';
-            }
-        }
-
-        async function triggerViolationSync() {
-            if (!confirm('Sync violations for existing inspections?\\n\\nThis checks inspections for new citations/penalties.')) return;
-
-            try {
-                document.getElementById('sync-status').textContent = 'Syncing violations...';
-                const result = await fetch(`${API_BASE}/sync/violations?max_inspections=3`, { method: 'POST' }).then(r => r.json());
-
-                let message = `Violation Sync Complete!\\n\\n`;
-                message += `Inspections checked: ${result.inspections_checked}\\n`;
-                message += `New violations found: ${result.new_violations_found}\\n`;
-                message += `Updated violations: ${result.updated_violations}\\n`;
-                message += `Inspections with new: ${result.inspections_with_new_violations}\\n`;
-                message += `Errors: ${result.errors}`;
-
-                if (result.logs && result.logs.length > 0) {
-                    console.log('Violation sync logs:', result.logs);
-                }
-
-                alert(message);
-                loadInspections();
-                loadNewViolations();
-                loadSyncStatus();
-            } catch (e) {
-                alert('Violation sync failed: ' + e.message);
-                document.getElementById('sync-status').textContent = 'Sync failed';
-            }
-        }
-
-        function escapeHtml(text) {
-            if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // Enriched Companies modal functions
-        async function openEnrichedCompaniesModal() {
-            document.getElementById('enriched-companies-modal').classList.remove('hidden');
-            await loadEnrichedCompanies();
-        }
-
-        function closeEnrichedCompaniesModal() {
-            document.getElementById('enriched-companies-modal').classList.add('hidden');
-        }
-
-        async function loadEnrichedCompanies() {
-            try {
-                const data = await fetch(`${API_BASE}/companies/enriched`).then(r => r.json());
-                const list = document.getElementById('enriched-companies-list');
-                const noData = document.getElementById('no-enriched-companies');
-                const countEl = document.getElementById('enriched-count');
-
-                countEl.textContent = `(${data.total} companies)`;
-
-                if (data.items.length === 0) {
-                    list.innerHTML = '';
-                    noData.classList.remove('hidden');
-                    return;
-                }
-
-                noData.classList.add('hidden');
-                list.innerHTML = data.items.map(company => `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-3">
-                            <div class="font-medium text-gray-900">${escapeHtml(company.name)}</div>
-                            ${company.website ? `<a href="${company.website}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800">${escapeHtml(company.website.replace('https://', '').replace('http://', '').split('/')[0])}</a>` : ''}
-                        </td>
-                        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(company.industry || '-')}</td>
-                        <td class="px-4 py-3 text-sm text-gray-600">${[company.city, company.state].filter(Boolean).join(', ') || '-'}</td>
-                        <td class="px-4 py-3 text-sm">
-                            ${company.phone ? `<a href="tel:${company.phone}" class="text-blue-600 hover:text-blue-800">${escapeHtml(company.phone)}</a>` : '-'}
-                        </td>
-                        <td class="px-4 py-3 text-sm font-medium ${company.total_penalty > 10000 ? 'text-red-600' : 'text-gray-900'}">
-                            ${company.total_penalty ? '$' + company.total_penalty.toLocaleString() : '-'}
-                        </td>
-                        <td class="px-4 py-3 text-xs text-gray-500">
-                            ${company.created_at ? new Date(company.created_at).toLocaleDateString() : '-'}
-                        </td>
-                        <td class="px-4 py-3">
-                            <div class="flex items-center gap-2">
-                                <button onclick="viewCompanyDetail(${company.id})" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                                    View
-                                </button>
-                                <button onclick="addCompanyToCRM(${company.inspection_id})"
-                                    class="text-green-600 hover:text-green-800 text-sm font-medium"
-                                    title="Add to CRM">
-                                    + CRM
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (e) {
-                console.error('Error loading enriched companies:', e);
-            }
-        }
-
-
-        async function viewCompanyDetail(companyId) {
-            try {
-                const company = await fetch(`${API_BASE}/companies/${companyId}`).then(r => r.json());
-                const modal = document.getElementById('company-detail-modal');
-                const content = document.getElementById('company-detail-content');
-
-                // Fetch inspection data for email generation
-                if (company.inspection_id) {
-                    try {
-                        const inspection = await fetch(`${API_BASE}/${company.inspection_id}`).then(r => r.json());
-                        currentInspection = inspection;
-                    } catch (e) {
-                        console.log('Could not load inspection data for email');
-                    }
-                }
-
-                // Reuse the displayCompanyData format but in a standalone modal
-                const data = company;
-                const websiteUrl = company.website;
-
-                // Parse services if it's a JSON string
-                let services = data.services;
-                if (typeof services === 'string') {
-                    try { services = JSON.parse(services); } catch(e) { services = null; }
-                }
-
-                // Parse other_locations if it's a JSON string
-                let otherLocations = data.other_addresses;
-                if (typeof otherLocations === 'string') {
-                    try { otherLocations = JSON.parse(otherLocations); } catch(e) { otherLocations = null; }
-                }
-
-                const contacts = data.contacts || [];
-
-                // Store current company data for editing
-                window.currentEditCompany = company;
-
-                content.innerHTML = `
-                    <div class="p-6 border-b flex justify-between items-center bg-green-50">
-                        <div>
-                            <h2 class="text-xl font-semibold" id="company-name-display">${escapeHtml(company.name)}</h2>
-                            <p class="text-sm text-gray-500">${[company.city, company.state].filter(Boolean).join(', ')}</p>
-                        </div>
-                        <div class="flex items-center gap-4">
-                            <button onclick="toggleEditMode(${company.id})" id="edit-company-btn"
-                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-yellow-500 text-white hover:bg-yellow-600 transition-colors">
-                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                </svg>
-                                Edit
-                            </button>
-                            <button onclick="reEnrichWithApollo(${company.inspection_id}, ${company.id})"
-                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
-                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                Apollo
-                            </button>
-                            <button onclick="addCompanyToCRM(${company.inspection_id})"
-                                id="add-to-crm-btn-${company.id}"
-                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">
-                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
-                                </svg>
-                                Add to CRM
-                            </button>
-                            <button onclick="openEmailModal(${company.inspection_id})"
-                                class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
-                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                                </svg>
-                                Generate Email
-                            </button>
-                            <button onclick="closeCompanyDetailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
-                        </div>
-                    </div>
-                    <div id="company-detail-body" class="p-6">
-                        <!-- Will be filled by displayCompanyData-style content -->
-                    </div>
-                    <div id="company-edit-form" class="p-6 hidden">
-                        <!-- Edit form will be shown here -->
-                    </div>
-                `;
-
-                // Now populate the body using similar logic to displayCompanyData
-                const bodyEl = document.getElementById('company-detail-body');
-                bodyEl.innerHTML = buildCompanyDetailHTML(data, websiteUrl, services, otherLocations, contacts);
-
-                modal.classList.remove('hidden');
-            } catch (e) {
-                console.error('Error loading company detail:', e);
-            }
-        }
-
-        function buildCompanyDetailHTML(data, websiteUrl, services, otherLocations, contacts) {
-            const social = data;
-            const companyName = data.official_name || data.name;
-            const employees = data.employee_range || data.employee_count || data.employee_estimate;
-            const phone = data.contact_info?.main_phone || data.phone;
-            const email = data.contact_info?.main_email || data.email;
-            const address = data.headquarters?.address || data.address;
-            const city = data.headquarters?.city || data.city;
-            const state = data.headquarters?.state || data.state;
-            const postalCode = data.headquarters?.postal_code || data.postal_code;
-            const registration = data.business_registration || data;
-
-            return `
-                <div class="space-y-6">
-                    <!-- Social Links Row -->
-                    <div class="flex items-center gap-3 flex-wrap">
-                        ${social.linkedin_url ? `
-                            <a href="${social.linkedin_url}" target="_blank" class="text-blue-700 hover:text-blue-900" title="LinkedIn">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg>
-                            </a>
-                        ` : ''}
-                        ${social.facebook_url ? `
-                            <a href="${social.facebook_url}" target="_blank" class="text-blue-600 hover:text-blue-800" title="Facebook">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
-                            </a>
-                        ` : ''}
-                        ${social.twitter_url ? `
-                            <a href="${social.twitter_url}" target="_blank" class="text-gray-800 hover:text-black" title="Twitter/X">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                            </a>
-                        ` : ''}
-                        ${social.instagram_url ? `
-                            <a href="${social.instagram_url}" target="_blank" class="text-pink-600 hover:text-pink-800" title="Instagram">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
-                            </a>
-                        ` : ''}
-                        ${social.youtube_url ? `
-                            <a href="${social.youtube_url}" target="_blank" class="text-red-600 hover:text-red-800" title="YouTube">
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                            </a>
-                        ` : ''}
-                        ${websiteUrl ? `
-                            <a href="${websiteUrl}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 ml-2 px-2 py-1 bg-blue-50 rounded">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                </svg>
-                                Website
-                            </a>
                         ` : ''}
                     </div>
 
@@ -3425,8 +2924,422 @@ async def osha_dashboard():
                             </div>
                         </div>
                     ` : ''}
+
+                    <!-- Related Inspections (populated via JavaScript) -->
+                    ${companyId ? `
+                        <div id="related-inspections-section" class="border-t border-gray-100 pt-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <p class="text-xs text-gray-500 uppercase tracking-wider">Related OSHA Inspections</p>
+                                <span id="related-inspections-count" class="text-xs text-gray-400"></span>
+                            </div>
+                            <div id="related-inspections-loading" class="text-sm text-gray-500 flex items-center gap-2">
+                                <svg class="animate-spin h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Loading inspections...
+                            </div>
+                            <div id="related-inspections-content" class="hidden"></div>
+                            <div id="related-inspections-empty" class="hidden text-sm text-gray-500">
+                                No related inspections found.
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
             `;
+        }
+
+        /**
+         * Display company data in the inspection detail modal.
+         * This wraps buildCompanyContentHTML with the appropriate header.
+         */
+        function displayCompanyData(inspectionId, result) {
+            const section = document.getElementById(`company-data-section-${inspectionId}`);
+            if (!section || !result.data) return;
+
+            const data = result.data;
+            const confidence = result.confidence || data.confidence || 'unknown';
+            const isFromRelated = result.isFromRelated || false;
+            const companyId = data.id;
+
+            // Normalize the data
+            const normalized = normalizeCompanyData(data);
+
+            // Confidence badge colors and labels
+            const confidenceBadge = {
+                high: { bg: 'bg-green-100', text: 'text-green-800', label: 'High Confidence' },
+                medium: { bg: 'bg-yellow-100', text: 'text-yellow-800', label: 'Medium Confidence' },
+                low: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Low Confidence' },
+                unknown: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Unverified' }
+            }[confidence] || { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Unknown' };
+
+            section.innerHTML = `
+                <div class="border-t border-gray-200">
+                    <!-- Header -->
+                    <div class="px-6 py-4 bg-green-50 border-b border-gray-200">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <h3 class="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                    Company Information (Enriched)
+                                </h3>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${confidenceBadge.bg} ${confidenceBadge.text}" title="Data verification confidence level">
+                                    ${confidenceBadge.label}
+                                </span>
+                                ${isFromRelated ? `
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800" title="Data from another inspection of this company">
+                                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                                        </svg>
+                                        From Related Inspection
+                                    </span>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="px-6 py-4">
+                        ${buildCompanyContentHTML(normalized, { companyId, inspectionId, showActions: true })}
+                    </div>
+                </div>
+            `;
+
+            // Load related inspections if we have a company ID
+            if (companyId) {
+                loadRelatedInspections(companyId);
+            }
+        }
+
+        async function loadCompanyData(inspectionId) {
+            try {
+                const company = await fetch(`${API_BASE}/${inspectionId}/company`).then(r => r.json());
+                if (company) {
+                    displayCompanyData(inspectionId, {
+                        data: company,
+                        website_url: company.website,
+                        confidence: company.confidence
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading company data:', e);
+            }
+        }
+
+        async function loadCompanyDataOrRelated(inspectionId) {
+            try {
+                const response = await fetch(`${API_BASE}/${inspectionId}/company-or-related`);
+                if (!response.ok) return;
+
+                const result = await response.json();
+                if (!result) return;
+
+                const company = result.company;
+                const isFromRelated = !result.is_direct;
+
+                // Display the company data
+                displayCompanyData(inspectionId, {
+                    data: company,
+                    website_url: company.website,
+                    confidence: company.confidence,
+                    isFromRelated: isFromRelated,
+                    sourceInspectionId: result.source_inspection_id
+                });
+            } catch (e) {
+                console.error('Error loading company data:', e);
+            }
+        }
+
+        function formatCronTime(value) {
+            if (!value) return 'n/a';
+            const dt = new Date(value);
+            if (Number.isNaN(dt.getTime())) return 'n/a';
+            return dt.toLocaleString();
+        }
+
+        function formatCronLine(label, run) {
+            if (!run) return `${label}: n/a`;
+            const status = run.status || 'unknown';
+            const started = formatCronTime(run.started_at);
+            const finished = formatCronTime(run.finished_at);
+            const error = run.error ? ' (error)' : '';
+            return `${label}: ${status}${error} | start ${started} | ${finished}`;
+        }
+
+        async function loadCronStatus() {
+            const container = document.getElementById('cron-status');
+            if (!container) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/cron/status`);
+                if (response.status === 401) {
+                    container.textContent = 'Cron status unavailable (unauthorized).';
+                    return;
+                }
+                if (!response.ok) {
+                    container.textContent = 'Cron status unavailable.';
+                    return;
+                }
+
+                const data = await response.json();
+                const latest = data.latest || {};
+                const inspections = latest.inspections;
+                const violations = latest['violations-bulk'];
+
+                container.innerHTML = [
+                    formatCronLine('Inspections', inspections),
+                    formatCronLine('Violations', violations),
+                ].map(line => `<div>${line}</div>`).join('');
+            } catch (e) {
+                container.textContent = 'Cron status unavailable.';
+            }
+        }
+
+        async function triggerInspectionSync() {
+            if (!confirm('Sync OSHA inspection records?\\n\\nThis fetches new inspections from the DOL API.')) return;
+
+            try {
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('Inspections', 'running', 'syncing...');
+                }
+                const result = await fetch(`${API_BASE}/sync?days_back=90&max_requests=10`, { method: 'POST' }).then(r => r.json());
+
+                let message = `Inspection Sync Complete!\\n\\n`;
+                message += `Fetched: ${result.fetched}\\n`;
+                message += `Created: ${result.created}\\n`;
+                message += `Updated: ${result.updated}\\n`;
+                message += `Skipped (old): ${result.skipped_old || 0}\\n`;
+                message += `Skipped (non-SE): ${result.skipped_state || 0}\\n`;
+                message += `Errors: ${result.errors}`;
+
+                if (result.logs && result.logs.length > 0) {
+                    console.log('Sync logs:', result.logs);
+                }
+
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('Inspections', 'success', `+${result.created} new`);
+                }
+                alert(message);
+                loadInspections();
+            } catch (e) {
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('Inspections', 'failed', e.message);
+                }
+                alert('Inspection sync failed: ' + e.message);
+            }
+        }
+
+        async function triggerViolationSync() {
+            if (!confirm('Sync violations for existing inspections?\\n\\nThis checks inspections from the past year for new citations/penalties.')) return;
+
+            try {
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('Violations', 'running', 'syncing...');
+                }
+                const result = await fetch(`${API_BASE}/sync/violations-recent?inspection_days_back=365&max_inspections=200&max_requests=50`, { method: 'POST' }).then(r => r.json());
+
+                let message = `Violation Sync Complete!\\n\\n`;
+                message += `Inspections checked: ${result.inspections_checked}\\n`;
+                message += `Violations fetched: ${result.violations_fetched}\\n`;
+                message += `New violations: ${result.violations_inserted}\\n`;
+                message += `Updated violations: ${result.violations_updated}\\n`;
+                message += `Inspections with new: ${result.inspections_with_new_violations}\\n`;
+                message += `Errors: ${result.errors}`;
+
+                if (result.logs && result.logs.length > 0) {
+                    console.log('Violation sync logs:', result.logs);
+                }
+
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('Violations', 'success', `+${result.violations_inserted} new`);
+                }
+                alert(message);
+                loadInspections();
+                loadNewViolations();
+            } catch (e) {
+                if (window.updateManualSyncStatus) {
+                    window.updateManualSyncStatus('Violations', 'failed', e.message);
+                }
+                alert('Violation sync failed: ' + e.message);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Enriched Companies modal functions
+        let enrichedCompaniesCache = {};  // Cache for company data to avoid re-fetching
+
+        async function openEnrichedCompaniesModal() {
+            document.getElementById('enriched-companies-modal').classList.remove('hidden');
+            await loadEnrichedCompanies();
+        }
+
+        function closeEnrichedCompaniesModal() {
+            document.getElementById('enriched-companies-modal').classList.add('hidden');
+        }
+
+        async function loadEnrichedCompanies() {
+            try {
+                const data = await fetch(`${API_BASE}/companies/enriched`).then(r => r.json());
+                const list = document.getElementById('enriched-companies-list');
+                const noData = document.getElementById('no-enriched-companies');
+                const countEl = document.getElementById('enriched-count');
+
+                countEl.textContent = `(${data.total} companies)`;
+
+                // Cache each company by ID for instant modal display
+                enrichedCompaniesCache = {};
+                data.items.forEach(company => {
+                    enrichedCompaniesCache[company.id] = company;
+                });
+
+                if (data.items.length === 0) {
+                    list.innerHTML = '';
+                    noData.classList.remove('hidden');
+                    return;
+                }
+
+                noData.classList.add('hidden');
+                list.innerHTML = data.items.map(company => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3">
+                            <div class="font-medium text-gray-900">${escapeHtml(company.name)}</div>
+                            ${company.website ? `<a href="${company.website}" target="_blank" class="text-xs text-blue-600 hover:text-blue-800">${escapeHtml(company.website.replace('https://', '').replace('http://', '').split('/')[0])}</a>` : ''}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(company.industry || '-')}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">${[company.city, company.state].filter(Boolean).join(', ') || '-'}</td>
+                        <td class="px-4 py-3 text-sm">
+                            ${company.phone ? `<a href="tel:${company.phone}" class="text-blue-600 hover:text-blue-800">${escapeHtml(company.phone)}</a>` : '-'}
+                        </td>
+                        <td class="px-4 py-3 text-sm font-medium ${company.total_penalty > 10000 ? 'text-red-600' : 'text-gray-900'}">
+                            ${company.total_penalty ? '$' + company.total_penalty.toLocaleString() : '-'}
+                        </td>
+                        <td class="px-4 py-3 text-xs text-gray-500">
+                            ${company.created_at ? new Date(company.created_at).toLocaleDateString() : '-'}
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-2">
+                                <button onclick="viewCompanyDetail(${company.id})" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                                    View
+                                </button>
+                                <button onclick="addCompanyToCRM(${company.inspection_id})"
+                                    class="text-green-600 hover:text-green-800 text-sm font-medium"
+                                    title="Add to CRM">
+                                    + CRM
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.error('Error loading enriched companies:', e);
+            }
+        }
+
+
+        async function viewCompanyDetail(companyId) {
+            try {
+                const modal = document.getElementById('company-detail-modal');
+                const content = document.getElementById('company-detail-content');
+
+                // Use cached data if available for instant display
+                let company = enrichedCompaniesCache[companyId];
+                let needsFullFetch = !company || !company.contacts;
+
+                // If not cached, fetch from API
+                if (!company) {
+                    company = await fetch(`${API_BASE}/companies/${companyId}`).then(r => r.json());
+                    needsFullFetch = false;  // Full fetch includes contacts
+                }
+
+                // Helper function to render the modal content
+                const renderModal = (companyData) => {
+                    window.currentEditCompany = companyData;
+                    const normalized = normalizeCompanyData(companyData);
+
+                    content.innerHTML = `
+                        <div class="p-6 border-b flex justify-between items-center bg-green-50 flex-wrap gap-4">
+                            <div>
+                                <h2 class="text-xl font-semibold" id="company-name-display">${escapeHtml(companyData.name)}</h2>
+                                <p class="text-sm text-gray-500">${[companyData.city, companyData.state].filter(Boolean).join(', ')}</p>
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <button onclick="toggleEditMode(${companyData.id})" id="edit-company-btn"
+                                    class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-yellow-500 text-white hover:bg-yellow-600 transition-colors">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                    </svg>
+                                    Edit
+                                </button>
+                                <button onclick="reEnrichWithApollo(${companyData.inspection_id}, ${companyData.id})"
+                                    class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                    Apollo
+                                </button>
+                                <button onclick="addCompanyToCRM(${companyData.inspection_id})"
+                                    id="add-to-crm-btn-${companyData.id}"
+                                    class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                                    </svg>
+                                    Add to CRM
+                                </button>
+                                <button onclick="openEmailModal(${companyData.inspection_id})"
+                                    class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                    </svg>
+                                    Generate Email
+                                </button>
+                                <button onclick="closeCompanyDetailModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                            </div>
+                        </div>
+                        <div id="company-detail-body" class="p-6">
+                            ${buildCompanyContentHTML(normalized, { companyId: companyData.id, inspectionId: companyData.inspection_id, showActions: false })}
+                        </div>
+                        <div id="company-edit-form" class="p-6 hidden">
+                            <!-- Edit form will be shown here -->
+                        </div>
+                    `;
+                };
+
+                // Render immediately with cached/fetched data
+                renderModal(company);
+                modal.classList.remove('hidden');
+
+                // Load related inspections asynchronously
+                loadRelatedInspections(companyId);
+
+                // If we used cache without contacts, fetch full data in background and re-render
+                if (needsFullFetch) {
+                    fetch(`${API_BASE}/companies/${companyId}`)
+                        .then(r => r.json())
+                        .then(fullCompany => {
+                            // Update cache with full data
+                            enrichedCompaniesCache[companyId] = fullCompany;
+                            // Re-render with contacts
+                            renderModal(fullCompany);
+                            // Re-load related inspections since DOM was replaced
+                            loadRelatedInspections(companyId);
+                        })
+                        .catch(e => console.log('Background fetch failed:', e));
+                }
+
+                // Fetch inspection data for email generation in background
+                if (company.inspection_id) {
+                    fetch(`${API_BASE}/${company.inspection_id}`)
+                        .then(r => r.json())
+                        .then(inspection => { currentInspection = inspection; })
+                        .catch(e => console.log('Could not load inspection data for email'));
+                }
+            } catch (e) {
+                console.error('Error loading company detail:', e);
+            }
         }
 
         async function addCompanyToCRM(inspectionId) {
@@ -3454,7 +3367,7 @@ async def osha_dashboard():
                         const countEl = document.getElementById('enriched-count');
                         if (countEl) {
                             const currentText = countEl.textContent;
-                            const match = currentText.match(/\((\d+)/);
+                            const match = currentText.match(/\\((\\d+)/);
                             if (match) {
                                 const newCount = parseInt(match[1]) - 1;
                                 countEl.textContent = `(${newCount} companies)`;
@@ -3490,6 +3403,108 @@ async def osha_dashboard():
         function closeCompanyDetailModal() {
             document.getElementById('company-detail-modal').classList.add('hidden');
             window.currentEditCompany = null;
+        }
+
+        async function loadRelatedInspections(companyId) {
+            const loadingEl = document.getElementById('related-inspections-loading');
+            const contentEl = document.getElementById('related-inspections-content');
+            const emptyEl = document.getElementById('related-inspections-empty');
+            const countEl = document.getElementById('related-inspections-count');
+
+            // Reset state
+            loadingEl.classList.remove('hidden');
+            contentEl.classList.add('hidden');
+            emptyEl.classList.add('hidden');
+            countEl.textContent = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/companies/${companyId}/related-inspections`);
+                if (!response.ok) throw new Error('Failed to load inspections');
+
+                const data = await response.json();
+                loadingEl.classList.add('hidden');
+
+                if (data.inspections.length === 0) {
+                    emptyEl.classList.remove('hidden');
+                    return;
+                }
+
+                countEl.textContent = `(${data.total} inspection${data.total !== 1 ? 's' : ''})`;
+
+                // Build the inspections table
+                const tableHtml = `
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Activity #</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Opened</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Closed</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Penalty</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Violations</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${data.inspections.map(insp => `
+                                    <tr class="${insp.is_primary ? 'bg-blue-50' : 'hover:bg-gray-50'}">
+                                        <td class="px-3 py-2 text-sm">
+                                            <span class="font-mono text-gray-900">${escapeHtml(insp.activity_nr)}</span>
+                                            ${insp.is_primary ? '<span class="ml-1 text-xs text-blue-600 font-medium">(Primary)</span>' : ''}
+                                        </td>
+                                        <td class="px-3 py-2 text-sm text-gray-600">
+                                            ${[insp.site_city, insp.site_state].filter(Boolean).join(', ') || '-'}
+                                        </td>
+                                        <td class="px-3 py-2 text-sm text-gray-600">
+                                            ${insp.open_date ? new Date(insp.open_date).toLocaleDateString() : '-'}
+                                        </td>
+                                        <td class="px-3 py-2 text-sm text-gray-600">
+                                            ${insp.close_case_date ? new Date(insp.close_case_date).toLocaleDateString() : '<span class="text-yellow-600">Open</span>'}
+                                        </td>
+                                        <td class="px-3 py-2 text-sm font-medium ${insp.total_current_penalty > 10000 ? 'text-red-600' : 'text-gray-900'}">
+                                            ${insp.total_current_penalty ? '$' + insp.total_current_penalty.toLocaleString() : '-'}
+                                        </td>
+                                        <td class="px-3 py-2 text-sm text-gray-600">
+                                            ${insp.violation_count > 0 ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">${insp.violation_count}</span>` : '-'}
+                                        </td>
+                                        <td class="px-3 py-2 text-sm">
+                                            <button onclick="viewInspectionFromCompany(${insp.id})" class="text-blue-600 hover:text-blue-800 font-medium">
+                                                View
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    ${data.total > 1 ? `
+                        <div class="mt-3 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                            <p class="text-sm text-amber-800">
+                                <svg class="inline-block w-4 h-4 mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                This company has <strong>${data.total} OSHA inspections</strong> on record. Total penalties: <strong>$${data.inspections.reduce((sum, i) => sum + (i.total_current_penalty || 0), 0).toLocaleString()}</strong>
+                            </p>
+                        </div>
+                    ` : ''}
+                `;
+
+                contentEl.innerHTML = tableHtml;
+                contentEl.classList.remove('hidden');
+            } catch (e) {
+                console.error('Error loading related inspections:', e);
+                loadingEl.classList.add('hidden');
+                emptyEl.textContent = 'Error loading inspections.';
+                emptyEl.classList.remove('hidden');
+            }
+        }
+
+        function viewInspectionFromCompany(inspectionId) {
+            // Close the company detail modal and open the inspection detail
+            closeCompanyDetailModal();
+            closeEnrichedCompaniesModal();
+            showDetail(inspectionId);
         }
 
         // Email Generation Functions
@@ -3851,84 +3866,14 @@ If you'd like to chat about your situation, I'm happy to help.`;
             }
         }
 
-        // Charts modal functions
-        async function openChartsModal() {
-            document.getElementById('charts-modal').classList.remove('hidden');
-            await loadChartsData();
-        }
-
-        function closeChartsModal() {
-            document.getElementById('charts-modal').classList.add('hidden');
-        }
-
-        async function loadChartsData() {
-            try {
-                const params = getFilterParams();
-                const queryString = new URLSearchParams(params).toString();
-                const stats = await fetch(`${API_BASE}/stats?${queryString}`).then(r => r.json());
-
-                // States chart
-                const statesCtx = document.getElementById('chart-states').getContext('2d');
-                if (statesChart) statesChart.destroy();
-                statesChart = new Chart(statesCtx, {
-                    type: 'bar',
-                    data: {
-                        labels: Object.keys(stats.inspections_by_state),
-                        datasets: [{
-                            label: 'Inspections',
-                            data: Object.values(stats.inspections_by_state),
-                            backgroundColor: 'rgba(59, 130, 246, 0.8)',
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: { legend: { display: false } }
-                    }
-                });
-
-                // Types chart
-                const typesCtx = document.getElementById('chart-types').getContext('2d');
-                if (typesChart) typesChart.destroy();
-                const typeLabels = Object.keys(stats.inspections_by_type).map(t => getInspectionTypeWithCode(t));
-                typesChart = new Chart(typesCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: typeLabels,
-                        datasets: [{
-                            data: Object.values(stats.inspections_by_type),
-                            backgroundColor: [
-                                'rgba(59, 130, 246, 0.8)',
-                                'rgba(16, 185, 129, 0.8)',
-                                'rgba(245, 158, 11, 0.8)',
-                                'rgba(239, 68, 68, 0.8)',
-                                'rgba(139, 92, 246, 0.8)',
-                                'rgba(236, 72, 153, 0.8)',
-                                'rgba(34, 197, 94, 0.8)',
-                                'rgba(251, 146, 60, 0.8)',
-                                'rgba(99, 102, 241, 0.8)',
-                                'rgba(14, 165, 233, 0.8)',
-                            ],
-                        }]
-                    },
-                    options: { responsive: true }
-                });
-            } catch (e) {
-                console.error('Error loading charts:', e);
-            }
-        }
-
         // Close modal on escape or outside click
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') {
                 closeModal();
-                closeChartsModal();
             }
         });
         document.getElementById('modal').addEventListener('click', e => {
             if (e.target.id === 'modal') closeModal();
-        });
-        document.getElementById('charts-modal').addEventListener('click', e => {
-            if (e.target.id === 'charts-modal') closeChartsModal();
         });
 
         // =============================================================================
@@ -4024,13 +3969,29 @@ If you'd like to chat about your situation, I'm happy to help.`;
         loadCRMStats();
     </script>
 
-    <div id="sync-widget" class="fixed bottom-4 right-4 z-50 w-80 bg-white border border-gray-200 rounded-lg shadow-lg">
+    <div id="sync-widget" class="fixed bottom-4 right-4 z-50 w-96 bg-white border border-gray-200 rounded-lg shadow-lg">
         <div class="flex items-center justify-between px-3 py-2 border-b bg-gray-50">
             <span class="text-xs font-semibold text-gray-800">Sync Status</span>
             <button id="sync-widget-toggle" class="text-xs text-blue-600 hover:text-blue-800">Hide</button>
         </div>
-        <div id="sync-widget-body" class="px-3 py-2">
-            <div id="sync-widget-content" class="text-[10px] text-gray-600 space-y-1">Loading...</div>
+        <div id="sync-widget-body" class="px-3 py-2 space-y-3">
+            <div>
+                <div class="text-[10px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Automatic (Cron)
+                </div>
+                <div id="sync-widget-cron" class="text-[10px] text-gray-600 space-y-0.5 pl-4">Loading...</div>
+            </div>
+            <div>
+                <div class="text-[10px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+                    Manual
+                </div>
+                <div id="sync-widget-manual" class="text-[10px] text-gray-600 space-y-0.5 pl-4">Loading...</div>
+            </div>
+            <div class="pt-1 border-t">
+                <a href="/api/inspections/cron/status" target="_blank" class="text-[10px] text-blue-600 hover:text-blue-800">View full sync history</a>
+            </div>
         </div>
     </div>
     <script>
@@ -4039,7 +4000,8 @@ If you'd like to chat about your situation, I'm happy to help.`;
             if (!widget) return;
             const body = document.getElementById('sync-widget-body');
             const toggle = document.getElementById('sync-widget-toggle');
-            const content = document.getElementById('sync-widget-content');
+            const cronContent = document.getElementById('sync-widget-cron');
+            const manualContent = document.getElementById('sync-widget-manual');
             let cronEventSource = null;
             let lastRunId = 0;
             let reconnectTimer = null;
@@ -4071,60 +4033,72 @@ If you'd like to chat about your situation, I'm happy to help.`;
                 }
             }
 
-            function getAddedCount(label, details) {
+            function getAddedCount(jobName, details) {
                 if (!details) return 'n/a';
-                if (label === 'Inspections') return details.new_inspections_added ?? 0;
-                if (label === 'Violations') return details.new_violations_found ?? 0;
-                if (label === 'EPA') return details.new ?? 0;
+                if (jobName === 'inspections') return details.created ?? details.new_inspections_added ?? 0;
+                if (jobName === 'violations-bulk') return details.violations_inserted ?? details.new_violations_found ?? 0;
+                if (jobName === 'epa') return details.new ?? 0;
                 return 'n/a';
             }
 
-            function formatLine(label, run) {
-                if (!run) return `${label}: n/a`;
+            function formatLine(label, run, jobName) {
+                if (!run) return `<span class="text-gray-400">${label}: No data</span>`;
                 const status = run.status || 'unknown';
+                const statusColor = status === 'success' ? 'text-green-600' : status === 'failed' ? 'text-red-600' : 'text-yellow-600';
                 const end = formatTime(run.finished_at);
                 const details = parseDetails(run.details);
-                const added = getAddedCount(label, details);
-                return `${label}: ${status} | ${end} | added ${added}`;
+                const added = getAddedCount(jobName, details);
+                return `${label}: <span class="${statusColor}">${status}</span> | ${end} | +${added}`;
             }
 
-            function getLatestRunId(latest) {
-                const ids = Object.values(latest || {}).map(entry => entry?.id || 0);
-                return ids.length ? Math.max(...ids) : 0;
+            function getLatestRunId(runs) {
+                if (!runs || !runs.length) return 0;
+                return Math.max(...runs.map(r => r.id || 0));
             }
 
-            function renderSyncStatus(latest) {
-                const lines = [
-                    formatLine('Inspections', latest.inspections),
-                    formatLine('Violations', latest.violations),
-                    formatLine('EPA', latest.epa),
+            function renderSyncStatus(data) {
+                const runs = data.runs || [];
+                const latest = data.latest || {};
+
+                // Separate cron vs manual runs
+                // Cron jobs typically have specific job names, manual syncs come from different endpoints
+                const cronJobNames = ['inspections', 'violations-bulk', 'epa'];
+                const manualJobNames = ['manual-inspections', 'manual-violations', 'manual-epa'];
+
+                // Render cron section using latest
+                const cronLines = [
+                    formatLine('Inspections', latest.inspections, 'inspections'),
+                    formatLine('Violations', latest['violations-bulk'], 'violations-bulk'),
+                    formatLine('EPA', latest.epa, 'epa'),
                 ];
+                cronContent.innerHTML = cronLines.map(line => `<div>${line}</div>`).join('');
 
-                content.innerHTML = [
-                    ...lines.map(line => `<div>${line}</div>`),
-                    `<div><a href="/api/inspections/cron/status" target="_blank" class="text-blue-600 hover:text-blue-800">View sync history</a></div>`
-                ].join('');
+                // For manual section, show the last manual sync from the runs list
+                // Manual syncs don't go through cron tracking, so we'll show sync/status info
+                manualContent.innerHTML = '<div class="text-gray-400">Use header buttons to trigger manual syncs</div>';
             }
 
             async function loadSyncWidget() {
                 try {
                     const response = await fetch('/api/inspections/cron/status');
                     if (response.status === 401) {
-                        content.textContent = 'Sync status unavailable (unauthorized).';
+                        cronContent.textContent = 'Unavailable (unauthorized)';
+                        manualContent.textContent = 'Unavailable (unauthorized)';
                         return false;
                     }
                     if (!response.ok) {
-                        content.textContent = 'Sync status unavailable.';
+                        cronContent.textContent = 'Unavailable';
+                        manualContent.textContent = 'Unavailable';
                         return false;
                     }
 
                     const data = await response.json();
-                    const latest = data.latest || {};
-                    renderSyncStatus(latest);
-                    lastRunId = getLatestRunId(latest);
+                    renderSyncStatus(data);
+                    lastRunId = getLatestRunId(data.runs);
                     return true;
                 } catch (e) {
-                    content.textContent = 'Sync status unavailable.';
+                    cronContent.textContent = 'Unavailable';
+                    manualContent.textContent = 'Unavailable';
                     return false;
                 }
             }
@@ -4140,7 +4114,7 @@ If you'd like to chat about your situation, I'm happy to help.`;
                     try {
                         const payload = JSON.parse(event.data || '{}');
                         if (payload.latest) {
-                            renderSyncStatus(payload.latest);
+                            renderSyncStatus({ latest: payload.latest, runs: [] });
                         }
                         if (payload.run_id) {
                             lastRunId = payload.run_id;
@@ -4164,6 +4138,32 @@ If you'd like to chat about your situation, I'm happy to help.`;
                 };
             }
 
+            // Expose function to update manual sync status from outside
+            window.updateManualSyncStatus = function(type, status, details) {
+                const statusColor = status === 'success' ? 'text-green-600' : status === 'failed' ? 'text-red-600' : 'text-yellow-600';
+                const time = new Date().toLocaleString();
+                manualContent.innerHTML = `<div>${type}: <span class="${statusColor}">${status}</span> | ${time} | ${details}</div>`;
+                // Persist to localStorage
+                const saved = JSON.parse(localStorage.getItem('manualSyncStatus') || '{}');
+                saved[type] = { status, details, time };
+                localStorage.setItem('manualSyncStatus', JSON.stringify(saved));
+            };
+
+            // Load saved manual sync status from localStorage
+            function loadSavedManualStatus() {
+                const saved = JSON.parse(localStorage.getItem('manualSyncStatus') || '{}');
+                const entries = Object.entries(saved);
+                if (entries.length === 0) {
+                    manualContent.textContent = 'No manual syncs yet';
+                    return;
+                }
+                manualContent.innerHTML = entries.map(([type, data]) => {
+                    const statusColor = data.status === 'success' ? 'text-green-600' : data.status === 'failed' ? 'text-red-600' : 'text-yellow-600';
+                    return `<div>${type}: <span class="${statusColor}">${data.status}</span> | ${data.time} | ${data.details}</div>`;
+                }).join('');
+            }
+
+            loadSavedManualStatus();
             loadSyncWidget().then((ok) => {
                 if (ok) startSyncStream();
             });
