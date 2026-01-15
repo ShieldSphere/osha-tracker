@@ -34,7 +34,14 @@ class WebEnrichmentService:
             # Extract URLs from search results
             urls = re.findall(r'href="//duckduckgo\.com/l/\?uddg=([^"&]+)', response.text)
             decoded_urls = [unquote(u) for u in urls[:num_results]]
-            return decoded_urls
+            cleaned_urls = []
+            for url in decoded_urls:
+                if "duckduckgo.com/" in url:
+                    continue
+                if "bing.com/aclick" in url:
+                    continue
+                cleaned_urls.append(url)
+            return cleaned_urls
         except Exception as e:
             logger.error(f"DuckDuckGo search error: {e}")
             return []
@@ -287,7 +294,7 @@ Content:
             logger.error(f"OpenAI extraction error: {e}")
             return None
 
-    async def enrich_company(self, company_name: str, city: str = None, state: str = None) -> Dict[str, Any]:
+    async def enrich_company(self, company_name: str, city: str = None, state: str = None, lite: bool = False) -> Dict[str, Any]:
         """
         Full multi-source enrichment pipeline.
 
@@ -313,14 +320,15 @@ Content:
         has_verified_source = False  # Track if we have a high-confidence source
         search_names = [company_name]  # Names to search for
 
-        logger.info(f"Starting enrichment for: {company_name}, {city}, {state}")
+        logger.info(f"Starting enrichment for: {company_name}, {city}, {state} (lite={lite})")
 
-        # 0. First, search for DBA/alternate names
-        dba_names = await self.find_dba_names(company_name, city, state)
-        if dba_names:
-            result["dba_names_found"] = dba_names
-            search_names.extend(dba_names)
-            logger.info(f"Will also search for DBA names: {dba_names}")
+        # 0. First, search for DBA/alternate names (skip in lite mode)
+        if not lite:
+            dba_names = await self.find_dba_names(company_name, city, state)
+            if dba_names:
+                result["dba_names_found"] = dba_names
+                search_names.extend(dba_names)
+                logger.info(f"Will also search for DBA names: {dba_names}")
 
         # 1. Find and fetch company website (try original name first, then DBAs)
         website_url = None
@@ -359,7 +367,7 @@ Content:
                 all_content.append(f"=== FACEBOOK PAGE ({facebook_url}) ===\n{content}")
 
         # 4. Search Secretary of State records
-        sos_url = await self.search_secretary_of_state(company_name, state)
+        sos_url = await self.search_secretary_of_state(company_name, state) if not lite else None
         if sos_url:
             result["sources_searched"].append(("secretary_of_state", sos_url))
             content = await self._fetch_with_jina(sos_url, max_chars=5000)
@@ -368,7 +376,7 @@ Content:
                 has_verified_source = True  # SOS records are authoritative
 
         # 5. Search for leadership/contacts - only if we have verified sources
-        if has_verified_source:
+        if has_verified_source and not lite:
             leadership_urls = await self.search_leadership_contacts(company_name, state)
             for url in leadership_urls[:3]:  # Limit to top 3 to save tokens
                 result["sources_searched"].append(("leadership_search", url))

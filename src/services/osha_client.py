@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 API_DELAY = 1.5  # Seconds between requests (balance between rate limits and Vercel timeout)
 MAX_RECORDS_PER_REQUEST = 200  # API limit per request (DOL allows up to 200)
 MAX_REQUESTS_PER_RUN = 50  # Prevent runaway API calls
-ACTIVITY_NR_BATCH_SIZE = 100  # Max activity_nrs per "in" filter request
+ACTIVITY_NR_BATCH_SIZE = 20  # Max activity_nrs per "in" filter request (reduced to avoid URL length limits)
 
 # Exponential backoff for 429 responses
 BACKOFF_DELAYS = [30, 60, 120]  # Seconds to wait on each retry
@@ -244,6 +244,7 @@ class OSHAClient:
             log_collector=log_collector
         )
 
+
     async def fetch_all_new_inspections(
         self,
         since_date: date,
@@ -403,6 +404,129 @@ class OSHAClient:
             # Delay between batches
             if batch_num < len(batches) - 1:
                 await asyncio.sleep(API_DELAY)
+
+        msg = f"Completed: {len(all_violations)} violations fetched in {requests_made} requests"
+        logger.info(msg)
+        if log_collector:
+            log_collector.log(msg)
+        return all_violations
+
+    async def fetch_violations_by_date(
+        self,
+        since_date: date,
+        limit: int = MAX_RECORDS_PER_REQUEST,
+        offset: int = 0,
+        log_collector: Optional["LogCollector"] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch violations with issuance_date > since_date using server-side filtering.
+
+        Args:
+            since_date: Only fetch violations issued AFTER this date
+            limit: Records per request (max 200)
+            offset: Pagination offset
+            log_collector: Optional LogCollector for response logging
+
+        Returns:
+            List of violation records
+        """
+        # Format date as YYYY-MM-DD for DOL API filter
+        date_str = since_date.strftime("%Y-%m-%d")
+
+        # Build filter_object for server-side filtering
+        filter_object = {
+            "field": "issuance_date",
+            "operator": "gt",
+            "value": date_str
+        }
+
+        params = {
+            "limit": min(limit, MAX_RECORDS_PER_REQUEST),
+            "offset": offset,
+            "filter_object": json.dumps(filter_object),
+        }
+
+        return await self._make_request(
+            "violation/json",
+            params,
+            note=f"issuance_date > {date_str}",
+            log_collector=log_collector
+        )
+
+    async def fetch_all_violations_by_date(
+        self,
+        since_date: date,
+        max_requests: int = MAX_REQUESTS_PER_RUN,
+        log_collector: Optional["LogCollector"] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch ALL violations with issuance_date > since_date.
+
+        Paginates through results until no more records or max_requests reached.
+        Uses offset-based pagination with limit=200 per request.
+
+        Args:
+            since_date: Only fetch violations issued AFTER this date
+            max_requests: Maximum API requests to prevent runaway calls
+            log_collector: Optional LogCollector for response logging
+
+        Returns:
+            List of all matching violation records
+        """
+        all_violations = []
+        offset = 0
+        requests_made = 0
+
+        msg1 = f"Fetching violations with issuance_date > {since_date}"
+        msg2 = f"Rate limiting: {API_DELAY}s between requests, max {max_requests} requests"
+        logger.info(msg1)
+        logger.info(msg2)
+        if log_collector:
+            log_collector.log(msg1)
+            log_collector.log(msg2)
+
+        while requests_made < max_requests:
+            batch = await self.fetch_violations_by_date(
+                since_date=since_date,
+                limit=MAX_RECORDS_PER_REQUEST,
+                offset=offset,
+                log_collector=log_collector,
+            )
+            requests_made += 1
+
+            if not batch:
+                msg = f"No more records at offset {offset}"
+                logger.info(msg)
+                if log_collector:
+                    log_collector.log(msg)
+                break
+
+            all_violations.extend(batch)
+            offset += len(batch)
+
+            msg = f"Progress: {len(all_violations)} total violations fetched"
+            logger.info(msg)
+            if log_collector:
+                log_collector.log(msg)
+
+            # If we got fewer than requested, we've reached the end
+            if len(batch) < MAX_RECORDS_PER_REQUEST:
+                msg = "Reached end of results"
+                logger.info(msg)
+                if log_collector:
+                    log_collector.log(msg)
+                break
+
+            # Rate limiting delay
+            if log_collector:
+                log_collector.log(f"Waiting {API_DELAY}s before next request...")
+            await asyncio.sleep(API_DELAY)
+
+        if requests_made >= max_requests:
+            msg = f"Reached max requests limit ({max_requests})"
+            logger.warning(msg)
+            if log_collector:
+                log_collector.log(msg)
 
         msg = f"Completed: {len(all_violations)} violations fetched in {requests_made} requests"
         logger.info(msg)

@@ -25,11 +25,11 @@ from src.database.connection import get_db_session
 from src.database.models import Inspection, Violation
 
 
-# Target states: SE Region + TX
-TARGET_STATES = {"AL", "FL", "GA", "KY", "MS", "NC", "SC", "TN", "TX"}
+# Target states: SE Region + TX (matches sync_service.py TARGET_STATES)
+TARGET_STATES = {"AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "TX", "VA", "WV"}
 
-# Minimum date (2023-01-01)
-MIN_DATE = date(2023, 1, 1)
+# Minimum date (2025-01-01)
+MIN_DATE = date(2025, 1, 1)
 
 
 def parse_date(date_str: str) -> Optional[date]:

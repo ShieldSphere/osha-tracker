@@ -239,6 +239,8 @@ class Company(Base):
     enrichment_source = Column(String(50))  # 'web', 'apollo', 'both', 'manual'
     web_enrichment_data = Column(Text)  # Full JSON from web enrichment (for reference)
     web_enriched_at = Column(DateTime)
+    public_enrichment_data = Column(Text)  # Full JSON from public sources (for reference)
+    public_enriched_at = Column(DateTime)
     apollo_enriched_at = Column(DateTime)
 
     # Company details

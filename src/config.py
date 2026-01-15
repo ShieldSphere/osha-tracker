@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Jina AI Reader (free tier: 1M tokens/month)
     JINA_READER_URL: str = "https://r.jina.ai/"
 
+    # Public enrichment sources
+    OPENCORPORATES_API_KEY: str = ""
+    NOMINATIM_EMAIL: str = ""
+
     # Scheduler Settings
     # More conservative interval to avoid API rate limits
     FETCH_INTERVAL_HOURS: int = 3

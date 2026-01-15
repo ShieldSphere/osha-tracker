@@ -6,8 +6,9 @@ from typing import Dict, Any, Tuple, List
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from src.database.models import Inspection
+from src.database.models import Inspection, Violation
 from src.database.connection import get_db_session
+from sqlalchemy import func
 from src.services.osha_client import OSHAClient
 
 logger = logging.getLogger(__name__)
@@ -230,7 +231,7 @@ class SyncService:
             oldest = db.query(Inspection).order_by(Inspection.open_date.asc()).first()
             newest = db.query(Inspection).order_by(Inspection.open_date.desc()).first()
 
-            # Get last sync time (most recent updated_at)
+            # Get last inspection sync time (most recent updated_at)
             last_updated = db.query(Inspection).order_by(
                 Inspection.updated_at.desc()
             ).first()
@@ -240,11 +241,22 @@ class SyncService:
             if last_updated and last_updated.updated_at:
                 last_sync_utc = last_updated.updated_at.isoformat() + "Z"
 
+            # Get violation stats
+            total_violations = db.query(func.count(Violation.id)).scalar() or 0
+
+            # Get last violation sync time (most recent updated_at on violations)
+            last_violation_updated = db.query(func.max(Violation.updated_at)).scalar()
+            last_violation_sync_utc = None
+            if last_violation_updated:
+                last_violation_sync_utc = last_violation_updated.isoformat() + "Z"
+
             return {
                 "total_inspections": total,
                 "oldest_inspection": oldest.open_date.isoformat() if oldest and oldest.open_date else None,
                 "newest_inspection": newest.open_date.isoformat() if newest and newest.open_date else None,
                 "last_sync": last_sync_utc,
+                "total_violations": total_violations,
+                "last_violation_sync": last_violation_sync_utc,
             }
 
 

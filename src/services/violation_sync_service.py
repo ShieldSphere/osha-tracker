@@ -47,6 +47,9 @@ class ViolationSyncService:
         3. Batch API calls to reduce rate limiting
         4. Keep each run short for Vercel timeouts
 
+        Important: This function manages DB connections carefully for serverless
+        environments - it releases the connection during API calls.
+
         Args:
             max_inspections_to_check: Limit to avoid rate limiting (default 3 for Vercel)
             rate_limit_delay: Seconds between API calls
@@ -72,35 +75,61 @@ class ViolationSyncService:
         }
 
         try:
+            # Step 1: Get candidate inspections (quick DB query, then release connection)
+            candidate_data = []
             with get_db_session() as db:
-                # Get candidate inspections to check
                 candidates = self._get_candidate_inspections_recent(
                     db,
                     limit=max_inspections_to_check,
                     days_back=days_back,
                     min_days_between_checks=min_days_between_checks,
                 )
-                logs.log(f"Found {len(candidates)} candidate inspections to check")
+                # Extract data before closing session
+                for c in candidates:
+                    candidate_data.append({
+                        "activity_nr": c.activity_nr,
+                        "estab_name": c.estab_name,
+                    })
 
-                activity_nrs = [c.activity_nr for c in candidates]
-                violations_by_activity, processed_activity_nrs = await self._fetch_violations_for_activity_batches(
-                    activity_nrs=activity_nrs,
-                    max_requests=max_requests,
-                    rate_limit_delay=rate_limit_delay,
-                    log_collector=logs,
-                )
+            logs.log(f"Found {len(candidate_data)} candidate inspections to check")
 
-                for inspection in candidates:
-                    if inspection.activity_nr not in processed_activity_nrs:
+            if not candidate_data:
+                stats["logs"] = logs.get_logs()
+                return stats
+
+            # Step 2: Fetch violations from API (DB connection is released)
+            activity_nrs = [c["activity_nr"] for c in candidate_data]
+            violations_by_activity, processed_activity_nrs = await self._fetch_violations_for_activity_batches(
+                activity_nrs=activity_nrs,
+                max_requests=max_requests,
+                rate_limit_delay=rate_limit_delay,
+                log_collector=logs,
+            )
+
+            # Step 3: Process each inspection (new DB connection for saves)
+            with get_db_session() as db:
+                for candidate in candidate_data:
+                    activity_nr = candidate["activity_nr"]
+                    estab_name = candidate["estab_name"]
+
+                    if activity_nr not in processed_activity_nrs:
                         stats["skipped"] += 1
                         continue
 
                     try:
-                        api_violations = violations_by_activity.get(inspection.activity_nr, [])
+                        # Get the inspection object for updates
+                        inspection = db.execute(
+                            select(Inspection).where(Inspection.activity_nr == activity_nr)
+                        ).scalar_one_or_none()
+
+                        if not inspection:
+                            continue
+
+                        api_violations = violations_by_activity.get(activity_nr, [])
                         stats["inspections_checked"] += 1
 
                         if not api_violations:
-                            logs.log(f"  No violations found for {inspection.activity_nr}")
+                            logs.log(f"  No violations found for {activity_nr}")
                             self._update_last_violation_check(db, inspection)
                             continue
 
@@ -115,9 +144,7 @@ class ViolationSyncService:
 
                         if had_new:
                             stats["inspections_with_new_violations"] += 1
-                            logs.log(
-                                f"  NEW: {new_count} new violations for {inspection.estab_name}"
-                            )
+                            logs.log(f"  NEW: {new_count} new violations for {estab_name}")
 
                             inspection.new_violations_detected = True
                             inspection.new_violations_count = new_count
@@ -129,7 +156,7 @@ class ViolationSyncService:
                         self._update_last_violation_check(db, inspection)
 
                     except Exception as e:
-                        logs.error(f"Error syncing violations for {inspection.activity_nr}", e)
+                        logs.error(f"Error syncing violations for {activity_nr}", e)
                         stats["errors"] += 1
 
             logs.log(
@@ -431,6 +458,426 @@ class ViolationSyncService:
                 self._update_inspection_penalties(db, inspection)
 
         return stats
+
+    async def sync_recent_violations(
+        self,
+        inspection_days_back: int = 365,
+        max_inspections: int = 200,
+        max_requests: int = 50,
+        rate_limit_delay: float = 1.5,
+    ) -> Dict[str, Any]:
+        """
+        Fetch violations for inspections likely to have new violations.
+
+        Strategy (due to DOL API limitations - no date filtering on violations):
+        1. Get inspections from our DB opened in the last N days (default 365)
+           that haven't been checked recently or have no violations yet
+        2. Batch their activity_nrs and fetch violations from OSHA API
+        3. Insert new violations, update existing ones
+
+        OSHA typically issues citations ~6 months after inspection, so we check
+        inspections from the past year to catch new violations.
+
+        Note: The DOL API does NOT support filtering violations by date fields
+        (issuance_date, load_dt). We must query by activity_nr.
+
+        Important: This function manages DB connections carefully for serverless
+        environments - it releases the connection during API calls.
+
+        Args:
+            inspection_days_back: Check inspections opened within this window (default 365)
+            max_inspections: Maximum inspections to check per run (default 200)
+            max_requests: Maximum API requests per run
+            rate_limit_delay: Seconds between API calls
+
+        Returns:
+            Statistics dictionary with logs
+        """
+        logs = LogCollector()
+        logs.log(f"Starting violations sync (inspection_days_back={inspection_days_back}, max_inspections={max_inspections})")
+
+        stats = {
+            "inspections_checked": 0,
+            "violations_fetched": 0,
+            "violations_inserted": 0,
+            "violations_updated": 0,
+            "inspections_with_new_violations": 0,
+            "errors": 0,
+            "logs": [],
+        }
+
+        try:
+            # Step 1: Get candidate inspections (quick DB query, then release connection)
+            cutoff_date = date.today() - timedelta(days=inspection_days_back)
+            check_cutoff = datetime.utcnow() - timedelta(days=7)
+
+            candidate_data = []  # Store just the data we need, not ORM objects
+            with get_db_session() as db:
+                candidates = db.execute(
+                    select(Inspection.activity_nr, Inspection.estab_name)
+                    .where(
+                        and_(
+                            Inspection.open_date >= cutoff_date,
+                            Inspection.site_state.in_(SOUTHEAST_STATES),
+                            or_(
+                                Inspection.last_violation_check.is_(None),
+                                Inspection.last_violation_check < check_cutoff,
+                            ),
+                        )
+                    )
+                    .order_by(Inspection.last_violation_check.asc().nullsfirst())
+                    .limit(max_inspections)
+                ).all()
+
+                # Extract data before closing session
+                for row in candidates:
+                    candidate_data.append({
+                        "activity_nr": row.activity_nr,
+                        "estab_name": row.estab_name,
+                    })
+
+            logs.log(f"Found {len(candidate_data)} inspections to check for violations")
+
+            if not candidate_data:
+                logs.log("No inspections need checking")
+                stats["logs"] = logs.get_logs()
+                return stats
+
+            # Step 2: Fetch violations from API (DB connection is released)
+            activity_nrs = [c["activity_nr"] for c in candidate_data]
+            logs.log(f"Fetching violations for {len(activity_nrs)} inspections...")
+
+            api_violations = await self.osha_client.fetch_all_violations_for_inspections(
+                activity_nrs=activity_nrs,
+                max_requests=max_requests,
+                log_collector=logs,
+            )
+            stats["violations_fetched"] = len(api_violations)
+            logs.log(f"Fetched {len(api_violations)} total violations from API")
+
+            # Group violations by activity_nr
+            violations_by_activity: Dict[str, List[Dict[str, Any]]] = {}
+            for viol in api_violations:
+                activity_nr = str(viol.get("activity_nr", ""))
+                if activity_nr:
+                    if activity_nr not in violations_by_activity:
+                        violations_by_activity[activity_nr] = []
+                    violations_by_activity[activity_nr].append(viol)
+
+            # Step 3: Process each inspection (new DB connection for saves)
+            with get_db_session() as db:
+                for candidate in candidate_data:
+                    activity_nr = candidate["activity_nr"]
+                    estab_name = candidate["estab_name"]
+
+                    try:
+                        stats["inspections_checked"] += 1
+                        violations = violations_by_activity.get(activity_nr, [])
+
+                        # Get the inspection object for updates
+                        inspection = db.execute(
+                            select(Inspection).where(Inspection.activity_nr == activity_nr)
+                        ).scalar_one_or_none()
+
+                        if not inspection:
+                            continue
+
+                        if violations:
+                            new_count, updated_count = self._upsert_violations(
+                                db, activity_nr, violations
+                            )
+
+                            stats["violations_inserted"] += new_count
+                            stats["violations_updated"] += updated_count
+
+                            if new_count > 0:
+                                stats["inspections_with_new_violations"] += 1
+                                logs.log(f"  {estab_name}: {new_count} new, {updated_count} updated")
+                                # Mark inspection as having new violations
+                                inspection.new_violations_detected = True
+                                inspection.new_violations_count = (inspection.new_violations_count or 0) + new_count
+                                inspection.new_violations_date = datetime.utcnow()
+
+                            # Update penalty totals
+                            self._update_inspection_penalties(db, inspection)
+
+                        # Update last check timestamp
+                        self._update_last_violation_check(db, inspection)
+
+                    except Exception as e:
+                        logs.error(f"Error processing {activity_nr}", e)
+                        stats["errors"] += 1
+
+            logs.log(
+                f"Sync complete: checked {stats['inspections_checked']} inspections, "
+                f"found {stats['violations_inserted']} new violations"
+            )
+
+        except Exception as e:
+            logs.error("Violations sync failed", e)
+            stats["errors"] += 1
+
+        stats["logs"] = logs.get_logs()
+        return stats
+
+    async def sync_violations_bulk(
+        self,
+        days_back: int = 180,
+        max_requests: int = 100,
+    ) -> Dict[str, Any]:
+        """
+        Bulk fetch violations by issuance_date, then upsert to database.
+
+        This is the efficient approach:
+        1. Fetch ALL violations issued in the last N days (paginated, 200 per request)
+        2. Bulk upsert to Supabase violations table
+        3. Matching to inspections happens via foreign key in DB, not in Python
+
+        Args:
+            days_back: How far back to query (default 180 days to account for ~90 day lag)
+            max_requests: Maximum API requests per run
+
+        Returns:
+            Statistics dictionary with logs
+        """
+        logs = LogCollector()
+        logs.log(f"Starting BULK violation sync (days_back={days_back}, max_requests={max_requests})")
+
+        stats = {
+            "violations_fetched": 0,
+            "violations_inserted": 0,
+            "violations_updated": 0,
+            "violations_skipped": 0,
+            "inspections_with_new_violations": 0,
+            "errors": 0,
+            "logs": [],
+        }
+
+        try:
+            # Step 1: Calculate the date cutoff
+            since_date = date.today() - timedelta(days=days_back)
+            logs.log(f"Fetching violations with issuance_date > {since_date}")
+
+            # Step 2: Bulk fetch all violations from API
+            all_violations = await self.osha_client.fetch_all_violations_by_date(
+                since_date=since_date,
+                max_requests=max_requests,
+                log_collector=logs,
+            )
+            stats["violations_fetched"] = len(all_violations)
+            logs.log(f"Fetched {len(all_violations)} total violations from API")
+
+            if not all_violations:
+                logs.log("No violations found")
+                stats["logs"] = logs.get_logs()
+                return stats
+
+            # Step 3: Group violations by activity_nr for batch processing
+            violations_by_activity: Dict[str, List[Dict[str, Any]]] = {}
+            for viol in all_violations:
+                activity_nr = str(viol.get("activity_nr", ""))
+                if activity_nr:
+                    if activity_nr not in violations_by_activity:
+                        violations_by_activity[activity_nr] = []
+                    violations_by_activity[activity_nr].append(viol)
+
+            logs.log(f"Violations span {len(violations_by_activity)} unique inspections")
+
+            # Step 4: Bulk upsert to database
+            with get_db_session() as db:
+                # Get all activity_nrs that exist in our inspections table (ONE query)
+                all_activity_nrs = list(violations_by_activity.keys())
+                existing_activity_nrs = set(
+                    row[0] for row in db.execute(
+                        select(Inspection.activity_nr).where(
+                            Inspection.activity_nr.in_(all_activity_nrs)
+                        )
+                    ).all()
+                )
+                logs.log(f"Found {len(existing_activity_nrs)} matching inspections in our database")
+
+                # Filter to only violations for inspections we track
+                relevant_activity_nrs = [a for a in all_activity_nrs if a in existing_activity_nrs]
+                skipped_activity_nrs = [a for a in all_activity_nrs if a not in existing_activity_nrs]
+                for a in skipped_activity_nrs:
+                    stats["violations_skipped"] += len(violations_by_activity[a])
+
+                if not relevant_activity_nrs:
+                    logs.log("No violations match tracked inspections")
+                    stats["logs"] = logs.get_logs()
+                    return stats
+
+                # Fetch ALL existing violations for relevant activity_nrs in ONE query
+                logs.log(f"Fetching existing violations for {len(relevant_activity_nrs)} inspections...")
+                existing_violations = db.execute(
+                    select(Violation.activity_nr, Violation.citation_id).where(
+                        Violation.activity_nr.in_(relevant_activity_nrs)
+                    )
+                ).all()
+
+                # Build a set of (activity_nr, citation_id) for fast lookup
+                # Normalize citation_id by stripping leading zeros to match API format
+                existing_keys: Set[Tuple[str, str]] = set()
+                for row in existing_violations:
+                    normalized_citation = str(row[1]).lstrip("0") or "0"
+                    existing_keys.add((row[0], normalized_citation))
+                logs.log(f"Found {len(existing_keys)} existing violations in database")
+
+                # Process violations - determine inserts vs updates
+                new_violations = []
+                updates_to_apply: List[Dict[str, Any]] = []
+                inspections_updated: Set[str] = set()
+
+                for activity_nr in relevant_activity_nrs:
+                    for api_viol in violations_by_activity[activity_nr]:
+                        citation_id = str(api_viol.get("citation_id", "")).lstrip("0") or "0"
+                        if not citation_id:
+                            continue
+
+                        key = (activity_nr, citation_id)
+                        parsed = self._parse_violation(api_viol, activity_nr)
+
+                        if key in existing_keys:
+                            # Existing - queue for bulk update
+                            updates_to_apply.append(parsed)
+                        else:
+                            # New violation - add to batch insert
+                            new_violations.append(Violation(**parsed))
+                            inspections_updated.add(activity_nr)
+
+                # Bulk insert new violations
+                if new_violations:
+                    logs.log(f"Inserting {len(new_violations)} new violations...")
+                    db.add_all(new_violations)
+                    db.commit()
+                    stats["violations_inserted"] = len(new_violations)
+                    logs.log(f"Inserted {len(new_violations)} new violations")
+
+                # Bulk update existing violations
+                if updates_to_apply:
+                    logs.log(f"Updating {len(updates_to_apply)} existing violations...")
+                    from sqlalchemy.dialects.postgresql import insert
+
+                    # Use PostgreSQL upsert (ON CONFLICT DO UPDATE)
+                    stmt = insert(Violation).values(updates_to_apply)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['activity_nr', 'citation_id'],
+                        set_={
+                            'standard': stmt.excluded.standard,
+                            'viol_type': stmt.excluded.viol_type,
+                            'issuance_date': stmt.excluded.issuance_date,
+                            'abate_date': stmt.excluded.abate_date,
+                            'abate_complete': stmt.excluded.abate_complete,
+                            'current_penalty': stmt.excluded.current_penalty,
+                            'initial_penalty': stmt.excluded.initial_penalty,
+                            'contest_date': stmt.excluded.contest_date,
+                            'final_order_date': stmt.excluded.final_order_date,
+                            'nr_instances': stmt.excluded.nr_instances,
+                            'nr_exposed': stmt.excluded.nr_exposed,
+                            'rec': stmt.excluded.rec,
+                            'gravity': stmt.excluded.gravity,
+                            'emphasis': stmt.excluded.emphasis,
+                            'hazcat': stmt.excluded.hazcat,
+                            'updated_at': datetime.utcnow(),
+                        }
+                    )
+                    db.execute(stmt)
+                    db.commit()
+                    stats["violations_updated"] = len(updates_to_apply)
+                    logs.log(f"Updated {len(updates_to_apply)} existing violations")
+
+                # Update inspection metadata for those with new violations
+                if inspections_updated:
+                    logs.log(f"Updating {len(inspections_updated)} inspections with new violations...")
+                    for activity_nr in inspections_updated:
+                        try:
+                            inspection = db.execute(
+                                select(Inspection).where(Inspection.activity_nr == activity_nr)
+                            ).scalar_one_or_none()
+
+                            if inspection:
+                                inspection.new_violations_detected = True
+                                inspection.new_violations_date = datetime.utcnow()
+                                self._update_inspection_penalties(db, inspection)
+                                self._update_last_violation_check(db, inspection)
+
+                        except Exception as e:
+                            logs.error(f"Error updating inspection {activity_nr}", e)
+
+                stats["inspections_with_new_violations"] = len(inspections_updated)
+
+            logs.log(
+                f"Bulk sync complete: {stats['violations_inserted']} inserted, "
+                f"{stats['violations_updated']} already existed, {stats['violations_skipped']} skipped (no matching inspection)"
+            )
+
+        except Exception as e:
+            logs.error("Bulk violation sync failed", e)
+            stats["errors"] += 1
+
+        stats["logs"] = logs.get_logs()
+        return stats
+
+    def _upsert_violations(
+        self,
+        db: Session,
+        activity_nr: str,
+        api_violations: List[Dict[str, Any]]
+    ) -> Tuple[int, int]:
+        """
+        Insert or update violations for an inspection.
+
+        Args:
+            db: Database session
+            activity_nr: Inspection activity number
+            api_violations: List of violation records from API
+
+        Returns:
+            Tuple of (new_count, updated_count)
+        """
+        new_count = 0
+        updated_count = 0
+
+        for api_viol in api_violations:
+            citation_id = str(api_viol.get("citation_id", "")).lstrip("0") or "0"
+            if not citation_id:
+                continue
+
+            # Check if violation already exists
+            existing = db.execute(
+                select(Violation).where(
+                    and_(
+                        Violation.activity_nr == activity_nr,
+                        Violation.citation_id == citation_id
+                    )
+                )
+            ).scalar_one_or_none()
+
+            parsed = self._parse_violation(api_viol, activity_nr)
+
+            if existing:
+                # Update existing violation if anything changed
+                updated = False
+                for key, value in parsed.items():
+                    if key not in ["activity_nr", "citation_id"]:
+                        current_value = getattr(existing, key, None)
+                        if current_value != value:
+                            setattr(existing, key, value)
+                            updated = True
+
+                if updated:
+                    existing.updated_at = datetime.utcnow()
+                    updated_count += 1
+            else:
+                # Insert new violation
+                new_violation = Violation(**parsed)
+                db.add(new_violation)
+                new_count += 1
+
+        if new_count > 0 or updated_count > 0:
+            db.commit()
+
+        return new_count, updated_count
 
 
 # Singleton instance

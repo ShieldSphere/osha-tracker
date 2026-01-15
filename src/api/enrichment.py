@@ -11,6 +11,7 @@ from src.database.models import Inspection, Company, Contact
 from src.services.company_normalizer import prepare_for_apollo, normalize_company_name
 from src.services.apollo_client import ApolloClient
 from src.services.web_enrichment import web_enrichment_service
+from src.services.public_enrichment import public_enrichment_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/enrichment", tags=["enrichment"])
@@ -219,6 +220,7 @@ async def preview_batch_enrichment(
 async def run_web_enrichment(
     inspection_id: int,
     quick: bool = Query(True, description="Quick mode: just find website (fast). Full mode: complete enrichment (slow)"),
+    fallback_web: bool = Query(False, description="If public enrichment fails, attempt web scraping (slow)."),
 ):
     """
     Run free web enrichment for an inspection.
@@ -270,12 +272,32 @@ async def run_web_enrichment(
                     "error": str(e),
                 }
         else:
-            # Full mode: complete enrichment (may timeout on serverless)
-            result = await web_enrichment_service.enrich_company(
+            # Full mode: public enrichment (free/public sources)
+            result = await public_enrichment_service.enrich_company(
                 company_name=normalized_name,
                 city=inspection.site_city,
                 state=inspection.site_state,
             )
+
+            if not result.get("success") and fallback_web:
+                web_result = await web_enrichment_service.enrich_company(
+                    company_name=normalized_name,
+                    city=inspection.site_city,
+                    state=inspection.site_state,
+                )
+                web_result["source"] = "web"
+                return {
+                    "inspection_id": inspection_id,
+                    "company_name": normalized_name,
+                    "success": web_result.get("success", False),
+                    "website_url": web_result.get("website_url"),
+                    "confidence": web_result.get("confidence", "none"),
+                    "data": web_result.get("data"),
+                    "sources_searched": web_result.get("sources_searched", []),
+                    "dba_names_found": web_result.get("dba_names_found", []),
+                    "error": web_result.get("error"),
+                    "source": web_result.get("source", "web"),
+                }
 
             return {
                 "inspection_id": inspection_id,
@@ -287,6 +309,7 @@ async def run_web_enrichment(
                 "sources_searched": result.get("sources_searched", []),
                 "dba_names_found": result.get("dba_names_found", []),
                 "error": result.get("error"),
+                "source": result.get("source", "public"),
             }
 
 
@@ -295,6 +318,7 @@ class SaveWebEnrichmentRequest(BaseModel):
     data: dict
     website_url: Optional[str] = None
     confidence: str = "medium"
+    source: str = "public"
 
 
 @router.post("/save-web-enrichment/{inspection_id}")
@@ -349,10 +373,15 @@ async def save_web_enrichment(inspection_id: int, request: SaveWebEnrichmentRequ
             "registered_agent": data.get("business_registration", {}).get("registered_agent"),
             "business_type": data.get("business_registration", {}).get("business_type"),
             "confidence": request.confidence,
-            "enrichment_source": "web",
-            "web_enrichment_data": json.dumps(data),
-            "web_enriched_at": datetime.utcnow(),
+            "enrichment_source": request.source,
         }
+
+        if request.source == "public":
+            company_data["public_enrichment_data"] = json.dumps(data)
+            company_data["public_enriched_at"] = datetime.utcnow()
+        else:
+            company_data["web_enrichment_data"] = json.dumps(data)
+            company_data["web_enriched_at"] = datetime.utcnow()
 
         if existing_company:
             # Update existing company
@@ -406,7 +435,7 @@ async def save_web_enrichment(inspection_id: int, request: SaveWebEnrichmentRequ
             "company_id": company.id,
             "company_name": company.name,
             "contacts_saved": contacts_saved,
-            "enrichment_source": "web",
+            "enrichment_source": request.source,
         }
 
 
