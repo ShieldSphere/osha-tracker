@@ -1,4 +1,5 @@
 """EPA enforcement cases API endpoints."""
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -151,10 +152,13 @@ async def list_cases(
     max_penalty: Optional[float] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    sort_by: str = Query("date_filed", pattern="^(date_filed|case_name|fed_penalty|facility_state)$"),
+    sort_by: str = Query("settlement_date", pattern="^(date_filed|settlement_date|date_closed|case_name|fed_penalty|facility_state)$"),
     sort_desc: bool = True
 ):
-    """List EPA enforcement cases with filtering and pagination."""
+    """List EPA enforcement cases with filtering and pagination.
+
+    Sort options: settlement_date (default), date_filed, date_closed, case_name, fed_penalty, facility_state
+    """
     with get_db_session() as db:
         query = db.query(EPACase)
 
@@ -344,6 +348,18 @@ async def get_laws():
         ]
 
 
+@router.get("/sync/test")
+async def sync_test():
+    """Test endpoint to verify the sync route is reachable."""
+    return {"status": "ok", "message": "EPA sync route is reachable", "method": "GET"}
+
+
+@router.post("/sync/test")
+async def sync_test_post():
+    """Test endpoint to verify POST to sync route works."""
+    return {"status": "ok", "message": "EPA sync POST route is reachable", "method": "POST"}
+
+
 @router.post("/sync", response_model=SyncResponse)
 async def sync_cases(
     background_tasks: BackgroundTasks,
@@ -354,66 +370,126 @@ async def sync_cases(
     """Trigger EPA case sync from ECHO API."""
     state_list = [s.strip().upper() for s in states.split(",")] if states else None
 
-    async def run_sync():
-        try:
-            stats = await epa_sync_service.sync_cases(
-                states=state_list,
-                days_back=days_back,
-                min_penalty=min_penalty
-            )
-            logger.info(f"EPA sync completed: {stats}")
-        except Exception as e:
-            logger.error(f"EPA sync error: {e}")
-
-    background_tasks.add_task(run_sync)
-
-    return SyncResponse(
-        success=True,
-        message=f"EPA sync started for {'all states' if not state_list else ', '.join(state_list)} ({days_back} days back)"
-    )
-
-
-@router.get("/cron/sync", response_model=SyncResponse)
-async def cron_sync_cases(
-    states: Optional[str] = Query(None, description="Comma-separated state codes"),
-    days_back: int = Query(90, ge=1, le=365),
-    min_penalty: float = Query(0, ge=0),
-    x_cron_secret: Optional[str] = Header(None),
-):
-    """Cron-triggered EPA sync."""
-    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid cron secret")
-
-    state_list = [s.strip().upper() for s in states.split(",")] if states else None
-
     with get_db_session() as db:
         run = CronRun(job_name="epa", status="running")
         db.add(run)
         db.commit()
         db.refresh(run)
+        run_id = run.id
 
+    def run_sync(run_id_value: int):
+        # Run the async bulk sync operation (single db session)
         try:
-            stats = await epa_sync_service.sync_cases(
+            stats = asyncio.run(epa_sync_service.sync_cases_bulk(
                 states=state_list,
                 days_back=days_back,
-                min_penalty=min_penalty,
-            )
-            run.status = "success"
-            run.finished_at = datetime.utcnow()
-            run.details = json.dumps(stats)
-            db.commit()
+                min_penalty=min_penalty
+            ))
+            # Update cron run status in separate session after sync completes
+            with get_db_session() as db:
+                run_row = db.query(CronRun).filter(CronRun.id == run_id_value).first()
+                if run_row:
+                    run_row.status = "success"
+                    run_row.finished_at = datetime.utcnow()
+                    run_row.details = json.dumps(stats)
+                    db.commit()
+            logger.info(f"EPA sync completed: {stats}")
+        except Exception as e:
+            logger.error(f"EPA sync error: {e}")
+            with get_db_session() as db:
+                run_row = db.query(CronRun).filter(CronRun.id == run_id_value).first()
+                if run_row:
+                    run_row.status = "failed"
+                    run_row.finished_at = datetime.utcnow()
+                    run_row.error = str(e)
+                    db.commit()
 
-            return SyncResponse(
-                success=True,
-                message=f"EPA sync completed ({days_back} days back)",
-                stats=stats,
-            )
-        except Exception as exc:
-            run.status = "failed"
-            run.finished_at = datetime.utcnow()
-            run.error = str(exc)
-            db.commit()
-            raise
+    background_tasks.add_task(run_sync, run_id)
+
+    return SyncResponse(
+        success=True,
+        message=f"EPA sync started for {'all states' if not state_list else ', '.join(state_list)} ({days_back} days back)",
+        stats={"run_id": run_id},
+    )
+
+
+@router.get("/sync/status")
+async def sync_status():
+    """Get latest EPA sync run status."""
+    with get_db_session() as db:
+        run = db.query(CronRun).filter(CronRun.job_name == "epa").order_by(CronRun.started_at.desc()).first()
+        if not run:
+            return {"latest": None}
+        return {
+            "latest": {
+                "id": run.id,
+                "status": run.status,
+                "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
+                "finished_at": run.finished_at.isoformat() + "Z" if run.finished_at else None,
+                "details": run.details,
+                "error": run.error,
+            }
+        }
+
+
+# Target states for EPA sync (same as OSHA sync - Southeast + Texas)
+EPA_TARGET_STATES = [
+    "AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "TX", "VA", "WV"
+]
+
+
+@router.get("/cron/sync", response_model=SyncResponse)
+async def cron_sync_cases(
+    states: Optional[str] = Query(None, description="Comma-separated state codes (defaults to SE+TX)"),
+    days_back: int = Query(90, ge=1, le=365),
+    min_penalty: float = Query(0, ge=0),
+    x_cron_secret: Optional[str] = Header(None),
+):
+    """Cron-triggered EPA sync. Defaults to Southeast + Texas states."""
+    if settings.CRON_SECRET and x_cron_secret != settings.CRON_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
+
+    # Default to target states if none specified
+    state_list = [s.strip().upper() for s in states.split(",")] if states else EPA_TARGET_STATES
+
+    # Create cron run record and release connection before sync
+    # to avoid connection pool exhaustion (pool size = 1)
+    with get_db_session() as db:
+        run = CronRun(job_name="epa", status="running")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        run_id = run.id  # Save ID before session closes
+
+    try:
+        stats = await epa_sync_service.sync_cases_bulk(
+            states=state_list,
+            days_back=days_back,
+            min_penalty=min_penalty,
+        )
+        # Re-fetch run in new session to update status
+        with get_db_session() as db:
+            run = db.query(CronRun).filter(CronRun.id == run_id).first()
+            if run:
+                run.status = "success"
+                run.finished_at = datetime.utcnow()
+                run.details = json.dumps(stats)
+                db.commit()
+
+        return SyncResponse(
+            success=True,
+            message=f"EPA sync completed ({days_back} days back)",
+            stats=stats,
+        )
+    except Exception as exc:
+        with get_db_session() as db:
+            run = db.query(CronRun).filter(CronRun.id == run_id).first()
+            if run:
+                run.status = "failed"
+                run.finished_at = datetime.utcnow()
+                run.error = str(exc)
+                db.commit()
+        raise
 
 
 @router.get("/date-range")
