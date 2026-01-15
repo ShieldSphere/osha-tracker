@@ -1,4 +1,5 @@
 """EPA ECHO Enforcement Case sync service."""
+import asyncio
 import csv
 import io
 import logging
@@ -6,6 +7,9 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
 import httpx
+
+# Rate limiting between API calls (seconds)
+EPA_API_DELAY = 0.5
 
 from src.database.connection import get_db_session
 from src.database.models import EPACase
@@ -301,6 +305,188 @@ class EPASyncService:
                 stats["new"] += 1
 
             db.commit()
+
+    async def sync_cases_bulk(
+        self,
+        states: Optional[List[str]] = None,
+        days_back: int = 90,
+        min_penalty: float = 0
+    ) -> Dict[str, Any]:
+        """
+        Bulk sync EPA enforcement cases using a single DB session and PostgreSQL upsert.
+
+        This is much faster than sync_cases() which opens a session per case.
+
+        Args:
+            states: List of state codes to sync (None = all states)
+            days_back: Number of days back to fetch
+            min_penalty: Minimum penalty threshold
+
+        Returns:
+            Dict with 'new', 'updated', 'errors', 'total_fetched' counts
+        """
+        from sqlalchemy.dialects.postgresql import insert
+
+        from_date = (datetime.now() - timedelta(days=days_back)).strftime("%m/%d/%Y")
+        to_date = datetime.now().strftime("%m/%d/%Y")
+
+        stats = {"new": 0, "updated": 0, "errors": 0, "total_fetched": 0}
+
+        # If no states specified, fetch all
+        states_to_sync = states or [None]
+
+        all_cases = []
+        for i, state in enumerate(states_to_sync):
+            # Rate limit between state fetches (skip delay on first request)
+            if i > 0:
+                logger.info(f"EPA bulk sync: Waiting {EPA_API_DELAY}s before next state...")
+                await asyncio.sleep(EPA_API_DELAY)
+
+            logger.info(f"EPA bulk sync: Fetching cases for state={state or 'ALL'} ({i+1}/{len(states_to_sync)})...")
+            result = await self.fetch_cases(
+                state=state,
+                from_date=from_date,
+                to_date=to_date,
+                min_penalty=min_penalty if min_penalty > 0 else None,
+            )
+
+            if "error" in result:
+                logger.error(f"Error fetching cases for {state}: {result['error']}")
+                stats["errors"] += 1
+                continue
+
+            if result.get("items"):
+                logger.info(f"EPA bulk sync: Got {len(result['items'])} cases for state={state or 'ALL'}")
+                all_cases.extend(result["items"])
+
+        stats["total_fetched"] = len(all_cases)
+
+        if not all_cases:
+            logger.info("No EPA cases to sync")
+            return stats
+
+        # Parse all cases into values dicts
+        parsed_cases = []
+        for case_data in all_cases:
+            case_number = case_data.get("CaseNumber")
+            if not case_number:
+                continue
+
+            settlement_cnt = case_data.get("SettlementCnt", "0") or "0"
+            try:
+                settlement_count = int(settlement_cnt)
+            except (ValueError, TypeError):
+                settlement_count = 0
+
+            parsed_cases.append({
+                "case_number": case_number,
+                "activity_id": case_data.get("ActivityID"),
+                "case_name": case_data.get("CaseName"),
+                "case_category": case_data.get("CaseCategoryCode"),
+                "case_category_desc": case_data.get("CaseCategoryDesc"),
+                "case_status": case_data.get("CaseStatusCode"),
+                "case_status_desc": case_data.get("CaseStatusDesc"),
+                "civil_criminal": case_data.get("CivilCriminalIndicator"),
+                "case_lead": case_data.get("Lead"),
+                "date_filed": self._parse_date(case_data.get("DateFiled")),
+                "settlement_date": self._parse_date(case_data.get("SettlementDate")),
+                "date_lodged": self._parse_date(case_data.get("DateLodged")),
+                "date_closed": self._parse_date(case_data.get("DateClosed")),
+                "fed_penalty": self._parse_float(case_data.get("FedPenalty")),
+                "state_local_penalty": self._parse_float(case_data.get("StateLocPenaltyAmt")),
+                "cost_recovery": self._parse_float(case_data.get("CostRecovery")),
+                "compliance_action_cost": self._parse_float(case_data.get("TotalCompActionAmt")),
+                "sep_cost": self._parse_float(case_data.get("SEPCost")),
+                "primary_naics": case_data.get("PrimaryNAICSCode"),
+                "primary_sic": case_data.get("PrimarySICCode"),
+                "caa_flag": self._parse_bool(case_data.get("CAAFlag")),
+                "cwa_flag": self._parse_bool(case_data.get("CWAFlag")),
+                "rcra_flag": self._parse_bool(case_data.get("RCRAFlag")),
+                "sdwa_flag": self._parse_bool(case_data.get("SDWAFlag")),
+                "cercla_flag": self._parse_bool(case_data.get("CerclaFlag")),
+                "epcra_flag": self._parse_bool(case_data.get("EpcraFlag")),
+                "tsca_flag": self._parse_bool(case_data.get("TscaFlag")),
+                "fifra_flag": self._parse_bool(case_data.get("FifraFlag")),
+                "primary_law": case_data.get("PrimaryLaw"),
+                "primary_section": case_data.get("PrimarySection"),
+                "federal_facility": self._parse_bool(case_data.get("FederalFlag")),
+                "tribal_land": self._parse_bool(case_data.get("TRIbalLandFlag")),
+                "settlement_count": settlement_count,
+                "enforcement_outcome": case_data.get("EnfOutcome"),
+                "updated_at": datetime.utcnow(),
+                "created_at": datetime.utcnow(),
+            })
+
+        if not parsed_cases:
+            logger.info("No valid EPA cases to sync")
+            return stats
+
+        logger.info(f"EPA bulk sync: Upserting {len(parsed_cases)} cases to database...")
+
+        # Bulk upsert using PostgreSQL ON CONFLICT
+        with get_db_session() as db:
+            # Get existing case numbers to track new vs updated
+            from sqlalchemy import select
+            case_numbers = [c["case_number"] for c in parsed_cases]
+            existing_cases = set(
+                row[0] for row in db.execute(
+                    select(EPACase.case_number).where(EPACase.case_number.in_(case_numbers))
+                ).fetchall()
+            )
+
+            # Use PostgreSQL upsert
+            stmt = insert(EPACase).values(parsed_cases)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=['case_number'],
+                set_={
+                    'activity_id': stmt.excluded.activity_id,
+                    'case_name': stmt.excluded.case_name,
+                    'case_category': stmt.excluded.case_category,
+                    'case_category_desc': stmt.excluded.case_category_desc,
+                    'case_status': stmt.excluded.case_status,
+                    'case_status_desc': stmt.excluded.case_status_desc,
+                    'civil_criminal': stmt.excluded.civil_criminal,
+                    'case_lead': stmt.excluded.case_lead,
+                    'date_filed': stmt.excluded.date_filed,
+                    'settlement_date': stmt.excluded.settlement_date,
+                    'date_lodged': stmt.excluded.date_lodged,
+                    'date_closed': stmt.excluded.date_closed,
+                    'fed_penalty': stmt.excluded.fed_penalty,
+                    'state_local_penalty': stmt.excluded.state_local_penalty,
+                    'cost_recovery': stmt.excluded.cost_recovery,
+                    'compliance_action_cost': stmt.excluded.compliance_action_cost,
+                    'sep_cost': stmt.excluded.sep_cost,
+                    'primary_naics': stmt.excluded.primary_naics,
+                    'primary_sic': stmt.excluded.primary_sic,
+                    'caa_flag': stmt.excluded.caa_flag,
+                    'cwa_flag': stmt.excluded.cwa_flag,
+                    'rcra_flag': stmt.excluded.rcra_flag,
+                    'sdwa_flag': stmt.excluded.sdwa_flag,
+                    'cercla_flag': stmt.excluded.cercla_flag,
+                    'epcra_flag': stmt.excluded.epcra_flag,
+                    'tsca_flag': stmt.excluded.tsca_flag,
+                    'fifra_flag': stmt.excluded.fifra_flag,
+                    'primary_law': stmt.excluded.primary_law,
+                    'primary_section': stmt.excluded.primary_section,
+                    'federal_facility': stmt.excluded.federal_facility,
+                    'tribal_land': stmt.excluded.tribal_land,
+                    'settlement_count': stmt.excluded.settlement_count,
+                    'enforcement_outcome': stmt.excluded.enforcement_outcome,
+                    'updated_at': stmt.excluded.updated_at,
+                }
+            )
+            db.execute(stmt)
+            db.commit()
+
+            # Count new vs updated
+            for c in parsed_cases:
+                if c["case_number"] in existing_cases:
+                    stats["updated"] += 1
+                else:
+                    stats["new"] += 1
+
+        logger.info(f"EPA bulk sync complete: {stats}")
+        return stats
 
 
 # Singleton instance
