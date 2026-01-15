@@ -1,10 +1,9 @@
 """EPA enforcement cases API endpoints."""
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List
 
-from fastapi import APIRouter, Query, HTTPException, BackgroundTasks, Header
+from fastapi import APIRouter, Query, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy import func, desc, asc, select
 
@@ -362,14 +361,15 @@ async def sync_test_post():
 
 @router.post("/sync", response_model=SyncResponse)
 async def sync_cases(
-    background_tasks: BackgroundTasks,
-    states: Optional[str] = Query(None, description="Comma-separated state codes"),
+    states: Optional[str] = Query(None, description="Comma-separated state codes (defaults to SE+TX)"),
     days_back: int = Query(90, ge=1, le=365),
     min_penalty: float = Query(0, ge=0)
 ):
-    """Trigger EPA case sync from ECHO API."""
-    state_list = [s.strip().upper() for s in states.split(",")] if states else None
+    """Trigger EPA case sync from ECHO API (runs synchronously for Vercel compatibility)."""
+    # Default to target states if none specified
+    state_list = [s.strip().upper() for s in states.split(",")] if states else EPA_TARGET_STATES
 
+    # Create cron run record
     with get_db_session() as db:
         run = CronRun(job_name="epa", status="running")
         db.add(run)
@@ -377,40 +377,35 @@ async def sync_cases(
         db.refresh(run)
         run_id = run.id
 
-    def run_sync(run_id_value: int):
-        # Run the async bulk sync operation (single db session)
-        try:
-            stats = asyncio.run(epa_sync_service.sync_cases_bulk(
-                states=state_list,
-                days_back=days_back,
-                min_penalty=min_penalty
-            ))
-            # Update cron run status in separate session after sync completes
-            with get_db_session() as db:
-                run_row = db.query(CronRun).filter(CronRun.id == run_id_value).first()
-                if run_row:
-                    run_row.status = "success"
-                    run_row.finished_at = datetime.utcnow()
-                    run_row.details = json.dumps(stats)
-                    db.commit()
-            logger.info(f"EPA sync completed: {stats}")
-        except Exception as e:
-            logger.error(f"EPA sync error: {e}")
-            with get_db_session() as db:
-                run_row = db.query(CronRun).filter(CronRun.id == run_id_value).first()
-                if run_row:
-                    run_row.status = "failed"
-                    run_row.finished_at = datetime.utcnow()
-                    run_row.error = str(e)
-                    db.commit()
+    try:
+        stats = await epa_sync_service.sync_cases_bulk(
+            states=state_list,
+            days_back=days_back,
+            min_penalty=min_penalty,
+        )
+        with get_db_session() as db:
+            run_row = db.query(CronRun).filter(CronRun.id == run_id).first()
+            if run_row:
+                run_row.status = "success"
+                run_row.finished_at = datetime.utcnow()
+                run_row.details = json.dumps(stats)
+                db.commit()
 
-    background_tasks.add_task(run_sync, run_id)
-
-    return SyncResponse(
-        success=True,
-        message=f"EPA sync started for {'all states' if not state_list else ', '.join(state_list)} ({days_back} days back)",
-        stats={"run_id": run_id},
-    )
+        return SyncResponse(
+            success=True,
+            message=f"EPA sync completed for {', '.join(state_list)} ({days_back} days back)",
+            stats=stats,
+        )
+    except Exception as e:
+        logger.error(f"EPA sync error: {e}")
+        with get_db_session() as db:
+            run_row = db.query(CronRun).filter(CronRun.id == run_id).first()
+            if run_row:
+                run_row.status = "failed"
+                run_row.finished_at = datetime.utcnow()
+                run_row.error = str(e)
+                db.commit()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sync/status")
