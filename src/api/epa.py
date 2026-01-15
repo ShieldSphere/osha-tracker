@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# Target states for EPA sync (same as OSHA sync - Southeast + Texas)
+EPA_TARGET_STATES = [
+    "AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "TX", "VA", "WV"
+]
+
+
 # =============================================================================
 # PYDANTIC MODELS
 # =============================================================================
@@ -445,12 +451,6 @@ async def sync_history(limit: int = Query(10, ge=1, le=50)):
                 for run in runs
             ]
         }
-
-
-# Target states for EPA sync (same as OSHA sync - Southeast + Texas)
-EPA_TARGET_STATES = [
-    "AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "TX", "VA", "WV"
-]
 
 
 @router.get("/cron/sync", response_model=SyncResponse)
