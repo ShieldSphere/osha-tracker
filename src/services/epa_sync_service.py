@@ -146,8 +146,11 @@ class EPASyncService:
             logger.error(f"Error fetching case detail for {case_number}: {e}")
             return None
 
-    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        """Parse EPA date format (MM/DD/YYYY or YYYY-MM-DD)."""
+    def _parse_date(self, date_str: Optional[str]):
+        """Parse EPA date format (MM/DD/YYYY or YYYY-MM-DD). Returns date object or None."""
+        if not date_str or not isinstance(date_str, str):
+            return None
+        date_str = date_str.strip()
         if not date_str:
             return None
         try:
@@ -158,6 +161,7 @@ class EPASyncService:
                 # Try YYYY-MM-DD format
                 return datetime.strptime(date_str, "%Y-%m-%d").date()
             except ValueError:
+                logger.warning(f"Could not parse date: {date_str}")
                 return None
 
     def _parse_float(self, value: Any) -> float:
@@ -367,55 +371,69 @@ class EPASyncService:
 
         # Parse all cases into values dicts
         parsed_cases = []
+        def safe_str(val, max_len=None):
+            """Convert value to string, truncate if needed."""
+            if val is None:
+                return None
+            s = str(val).strip() if val else None
+            if s and max_len:
+                s = s[:max_len]
+            return s
+
         for case_data in all_cases:
-            case_number = case_data.get("CaseNumber")
-            if not case_number:
-                continue
-
-            settlement_cnt = case_data.get("SettlementCnt", "0") or "0"
             try:
-                settlement_count = int(settlement_cnt)
-            except (ValueError, TypeError):
-                settlement_count = 0
+                case_number = case_data.get("CaseNumber")
+                if not case_number:
+                    continue
 
-            parsed_cases.append({
-                "case_number": case_number,
-                "activity_id": case_data.get("ActivityID"),
-                "case_name": case_data.get("CaseName"),
-                "case_category": case_data.get("CaseCategoryCode"),
-                "case_category_desc": case_data.get("CaseCategoryDesc"),
-                "case_status": case_data.get("CaseStatusCode"),
-                "case_status_desc": case_data.get("CaseStatusDesc"),
-                "civil_criminal": case_data.get("CivilCriminalIndicator"),
-                "case_lead": case_data.get("Lead"),
-                "date_filed": self._parse_date(case_data.get("DateFiled")),
-                "settlement_date": self._parse_date(case_data.get("SettlementDate")),
-                "date_lodged": self._parse_date(case_data.get("DateLodged")),
-                "date_closed": self._parse_date(case_data.get("DateClosed")),
-                "fed_penalty": self._parse_float(case_data.get("FedPenalty")),
-                "state_local_penalty": self._parse_float(case_data.get("StateLocPenaltyAmt")),
-                "cost_recovery": self._parse_float(case_data.get("CostRecovery")),
-                "compliance_action_cost": self._parse_float(case_data.get("TotalCompActionAmt")),
-                "sep_cost": self._parse_float(case_data.get("SEPCost")),
-                "primary_naics": case_data.get("PrimaryNAICSCode"),
-                "primary_sic": case_data.get("PrimarySICCode"),
-                "caa_flag": self._parse_bool(case_data.get("CAAFlag")),
-                "cwa_flag": self._parse_bool(case_data.get("CWAFlag")),
-                "rcra_flag": self._parse_bool(case_data.get("RCRAFlag")),
-                "sdwa_flag": self._parse_bool(case_data.get("SDWAFlag")),
-                "cercla_flag": self._parse_bool(case_data.get("CerclaFlag")),
-                "epcra_flag": self._parse_bool(case_data.get("EpcraFlag")),
-                "tsca_flag": self._parse_bool(case_data.get("TscaFlag")),
-                "fifra_flag": self._parse_bool(case_data.get("FifraFlag")),
-                "primary_law": case_data.get("PrimaryLaw"),
-                "primary_section": case_data.get("PrimarySection"),
-                "federal_facility": self._parse_bool(case_data.get("FederalFlag")),
-                "tribal_land": self._parse_bool(case_data.get("TRIbalLandFlag")),
-                "settlement_count": settlement_count,
-                "enforcement_outcome": case_data.get("EnfOutcome"),
-                "updated_at": datetime.utcnow(),
-                "created_at": datetime.utcnow(),
-            })
+                settlement_cnt = case_data.get("SettlementCnt", "0") or "0"
+                try:
+                    settlement_count = int(settlement_cnt)
+                except (ValueError, TypeError):
+                    settlement_count = 0
+
+                parsed_cases.append({
+                    "case_number": safe_str(case_number, 50),
+                    "activity_id": safe_str(case_data.get("ActivityID"), 50),
+                    "case_name": safe_str(case_data.get("CaseName"), 500),
+                    "case_category": safe_str(case_data.get("CaseCategoryCode"), 10),
+                    "case_category_desc": safe_str(case_data.get("CaseCategoryDesc"), 100),
+                    "case_status": safe_str(case_data.get("CaseStatusCode"), 50),
+                    "case_status_desc": safe_str(case_data.get("CaseStatusDesc"), 100),
+                    "civil_criminal": safe_str(case_data.get("CivilCriminalIndicator"), 10),
+                    "case_lead": safe_str(case_data.get("Lead"), 10),
+                    "date_filed": self._parse_date(case_data.get("DateFiled")),
+                    "settlement_date": self._parse_date(case_data.get("SettlementDate")),
+                    "date_lodged": self._parse_date(case_data.get("DateLodged")),
+                    "date_closed": self._parse_date(case_data.get("DateClosed")),
+                    "fed_penalty": self._parse_float(case_data.get("FedPenalty")),
+                    "state_local_penalty": self._parse_float(case_data.get("StateLocPenaltyAmt")),
+                    "cost_recovery": self._parse_float(case_data.get("CostRecovery")),
+                    "compliance_action_cost": self._parse_float(case_data.get("TotalCompActionAmt")),
+                    "sep_cost": self._parse_float(case_data.get("SEPCost")),
+                    "primary_naics": safe_str(case_data.get("PrimaryNAICSCode"), 10),
+                    "primary_sic": safe_str(case_data.get("PrimarySICCode"), 10),
+                    "caa_flag": self._parse_bool(case_data.get("CAAFlag")),
+                    "cwa_flag": self._parse_bool(case_data.get("CWAFlag")),
+                    "rcra_flag": self._parse_bool(case_data.get("RCRAFlag")),
+                    "sdwa_flag": self._parse_bool(case_data.get("SDWAFlag")),
+                    "cercla_flag": self._parse_bool(case_data.get("CerclaFlag")),
+                    "epcra_flag": self._parse_bool(case_data.get("EpcraFlag")),
+                    "tsca_flag": self._parse_bool(case_data.get("TscaFlag")),
+                    "fifra_flag": self._parse_bool(case_data.get("FifraFlag")),
+                    "primary_law": safe_str(case_data.get("PrimaryLaw"), 50),
+                    "primary_section": safe_str(case_data.get("PrimarySection"), 100),
+                    "federal_facility": self._parse_bool(case_data.get("FederalFlag")),
+                    "tribal_land": self._parse_bool(case_data.get("TRIbalLandFlag")),
+                    "settlement_count": settlement_count,
+                    "enforcement_outcome": safe_str(case_data.get("EnfOutcome")),
+                    "updated_at": datetime.utcnow(),
+                    "created_at": datetime.utcnow(),
+                })
+            except Exception as e:
+                logger.error(f"Error parsing case {case_data.get('CaseNumber', 'unknown')}: {e}")
+                stats["errors"] += 1
+                continue
 
         if not parsed_cases:
             logger.info("No valid EPA cases to sync")
