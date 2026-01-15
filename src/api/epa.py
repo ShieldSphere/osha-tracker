@@ -432,6 +432,26 @@ async def sync_status():
         }
 
 
+@router.get("/sync/history")
+async def sync_history(limit: int = Query(10, ge=1, le=50)):
+    """Get EPA sync run history with errors."""
+    with get_db_session() as db:
+        runs = db.query(CronRun).filter(CronRun.job_name == "epa").order_by(CronRun.started_at.desc()).limit(limit).all()
+        return {
+            "runs": [
+                {
+                    "id": run.id,
+                    "status": run.status,
+                    "started_at": run.started_at.isoformat() + "Z" if run.started_at else None,
+                    "finished_at": run.finished_at.isoformat() + "Z" if run.finished_at else None,
+                    "details": run.details,
+                    "error": run.error,
+                }
+                for run in runs
+            ]
+        }
+
+
 # Target states for EPA sync (same as OSHA sync - Southeast + Texas)
 EPA_TARGET_STATES = [
     "AL", "AR", "FL", "GA", "KY", "LA", "MS", "NC", "SC", "TN", "TX", "VA", "WV"
