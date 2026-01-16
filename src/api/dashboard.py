@@ -3156,14 +3156,14 @@ async def osha_dashboard():
 
             const startTime = performance.now();
             console.log('%c[OSHA Violation Sync] Starting...', 'color: #7c3aed; font-weight: bold');
-            console.log('[OSHA Violation Sync] Parameters: inspection_days_back=365, max_inspections=200, max_requests=50');
+            console.log('[OSHA Violation Sync] Parameters: inspection_days_back=365, max_inspections=50, max_requests=20');
 
             try {
                 if (window.updateManualSyncStatus) {
                     window.updateManualSyncStatus('Violations', 'running', 'syncing...');
                 }
                 console.log('[OSHA Violation Sync] Sending POST request to API...');
-                const response = await fetch(`${API_BASE}/sync/violations-recent?inspection_days_back=365&max_inspections=200&max_requests=50`, { method: 'POST' });
+                const response = await fetch(`${API_BASE}/sync/violations-recent?inspection_days_back=365&max_inspections=50&max_requests=20`, { method: 'POST' });
                 console.log(`[OSHA Violation Sync] Response status: ${response.status}`);
 
                 const result = await response.json();
